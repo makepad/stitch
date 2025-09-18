@@ -195,7 +195,7 @@ impl Module {
         store: &mut Store,
         linker: &Linker,
     ) -> Result<Instance, Error> {
-        let instance = Instance::uninited(store.guard());
+        let instance = Instance::uninited();
         let mut initer = InstanceIniter::new(store.guard());
         for type_ in self.types.iter() {
             initer.push_type(store.get_or_intern_type(type_));
