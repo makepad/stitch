@@ -4,10 +4,11 @@ use {
         decode::{Decode, DecodeError, Decoder},
         error::Error,
         exec,
+        guarded::Guarded,
         instance::Instance,
         into_func::IntoFunc,
         stack::StackGuard,
-        store::{Handle, InternedFuncType, Store, StoreId, UnguardedHandle},
+        store::{Handle, InternedFuncType, Store, StoreGuard, UnguardedHandle},
         val::{Val, ValType},
     },
     std::{error, fmt, mem, sync::Arc},
@@ -72,8 +73,8 @@ impl Func {
     /// # Safety
     ///
     /// The given [`UnguardedFunc`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(func: UnguardedFunc, store_id: StoreId) -> Self {
-        Self(Handle::from_unguarded(func, store_id))
+    pub(crate) unsafe fn from_unguarded(func: UnguardedFunc, store_guard: StoreGuard) -> Self {
+        Self(Handle::from_unguarded(func, store_guard))
     }
 
     /// Converts this [`Func`] to an [`UnguardedFunc`].
@@ -81,8 +82,8 @@ impl Func {
     /// # Panics
     ///
     /// This [`Func`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedFunc {
-        self.0.to_unguarded(store_id)
+    pub(crate) fn to_unguarded(self, store_guard: StoreGuard) -> UnguardedFunc {
+        self.0.to_unguarded(store_guard)
     }
 
     /// Ensures that this [`Func`] is compiled, if it is a Wasm function.
@@ -103,6 +104,19 @@ impl Func {
             unreachable!();
         };
         *func.code_mut() = Code::Compiled(code);
+    }
+}
+
+impl Guarded for Func {
+    type Unguarded = UnguardedFunc;
+    type Guard = StoreGuard;
+
+    unsafe fn from_unguarded(unguarded: Self::Unguarded, guard: Self::Guard) -> Self {
+        Self(Handle::from_unguarded(unguarded, guard))
+    }
+
+    fn to_unguarded(self, guard: Self::Guard) -> Self::Unguarded {
+        self.0.to_unguarded(guard)
     }
 }
 

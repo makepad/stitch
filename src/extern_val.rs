@@ -2,8 +2,9 @@ use crate::{
     decode::{Decode, DecodeError, Decoder},
     func::{Func, FuncType, UnguardedFunc},
     global::{Global, GlobalType, UnguardedGlobal},
+    guarded::Guarded,
     mem::{Mem, MemType, UnguardedMem},
-    store::{Store, StoreId},
+    store::{Store, StoreGuard},
     table::{Table, TableType, UnguardedTable},
 };
 
@@ -78,36 +79,6 @@ impl ExternVal {
             _ => None,
         }
     }
-
-    /// Converts the given [`UnguardedExternVal`] to an [`ExternVal`].
-    ///
-    /// # Safety
-    ///
-    /// Any [`UnguardedHandle`] in the given [`UnguardedExternVal`] must be owned by the [`Store`]
-    /// with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(val: UnguardedExternVal, store_id: StoreId) -> Self {
-        match val {
-            UnguardedExternVal::Func(func) => Func::from_unguarded(func, store_id).into(),
-            UnguardedExternVal::Table(table) => Table::from_unguarded(table, store_id).into(),
-            UnguardedExternVal::Mem(mem) => Mem::from_unguarded(mem, store_id).into(),
-            UnguardedExternVal::Global(global) => Global::from_unguarded(global, store_id).into(),
-        }
-    }
-
-    /// Converts this [`ExternVal`] to an [`UnguardedExternVal`].
-    ///
-    /// # Panics
-    ///
-    /// Panics if any [`Handle`] in this [`ExternVal`] is not owned by the [`Store`] with the given
-    /// [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedExternVal {
-        match self {
-            Self::Func(func) => func.to_unguarded(store_id).into(),
-            Self::Table(table) => table.to_unguarded(store_id).into(),
-            Self::Memory(mem) => mem.to_unguarded(store_id).into(),
-            Self::Global(global) => global.to_unguarded(store_id).into(),
-        }
-    }
 }
 
 impl From<Func> for ExternVal {
@@ -131,6 +102,29 @@ impl From<Mem> for ExternVal {
 impl From<Global> for ExternVal {
     fn from(global: Global) -> Self {
         Self::Global(global)
+    }
+}
+
+impl Guarded for ExternVal {
+    type Unguarded = UnguardedExternVal;
+    type Guard = StoreGuard;
+
+    unsafe fn from_unguarded(unguarded: Self::Unguarded, guard: Self::Guard) -> Self {
+        match unguarded {
+            UnguardedExternVal::Func(func) => Func::from_unguarded(func, guard).into(),
+            UnguardedExternVal::Table(table) => Table::from_unguarded(table, guard).into(),
+            UnguardedExternVal::Mem(mem) => Mem::from_unguarded(mem, guard).into(),
+            UnguardedExternVal::Global(global) => Global::from_unguarded(global, guard).into(),
+        }
+    }
+
+    fn to_unguarded(self, guard: Self::Guard) -> Self::Unguarded {
+        match self {
+            Self::Func(func) => func.to_unguarded(guard).into(),
+            Self::Table(table) => table.to_unguarded(guard).into(),
+            Self::Memory(mem) => mem.to_unguarded(guard).into(),
+            Self::Global(global) => global.to_unguarded(guard).into(),
+        }
     }
 }
 

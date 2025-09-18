@@ -3,9 +3,10 @@ use {
         decode::{Decode, DecodeError, Decoder},
         extern_ref::{ExternRef, UnguardedExternRef},
         func_ref::{FuncRef, UnguardedFuncRef},
+        guarded::Guarded,
         ref_::{Ref, RefType, UnguardedRef},
         stack::StackSlot,
-        store::StoreId,
+        store::StoreGuard,
     },
     std::fmt,
 };
@@ -137,38 +138,6 @@ impl Val {
             _ => None,
         }
     }
-
-    /// Converts the given [`UnguardedVal`] to a [`Val`].
-    ///
-    /// # Safety
-    ///
-    /// The [`UnguardedVal`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(val: UnguardedVal, store_id: StoreId) -> Self {
-        match val {
-            UnguardedVal::I32(val) => val.into(),
-            UnguardedVal::I64(val) => val.into(),
-            UnguardedVal::F32(val) => val.into(),
-            UnguardedVal::F64(val) => val.into(),
-            UnguardedVal::FuncRef(val) => FuncRef::from_unguarded(val, store_id).into(),
-            UnguardedVal::ExternRef(val) => ExternRef::from_unguarded(val, store_id).into(),
-        }
-    }
-
-    /// Converts this [`Val`] to an [`UnguardedVal`].
-    ///
-    /// # Panics
-    ///
-    /// This [`Val`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedVal {
-        match self {
-            Val::I32(val) => val.into(),
-            Val::I64(val) => val.into(),
-            Val::F32(val) => val.into(),
-            Val::F64(val) => val.into(),
-            Val::FuncRef(val) => val.to_unguarded(store_id).into(),
-            Val::ExternRef(val) => val.to_unguarded(store_id).into(),
-        }
-    }
 }
 
 impl From<i32> for Val {
@@ -215,6 +184,38 @@ impl From<Ref> for Val {
         }
     }
 }
+
+impl Guarded for Val {
+    type Unguarded = UnguardedVal;
+    type Guard = StoreGuard;
+
+    unsafe fn from_unguarded(unguarded: Self::Unguarded, guard: Self::Guard) -> Self {
+        match unguarded {
+            UnguardedVal::I32(val) => Val::I32(val),
+            UnguardedVal::I64(val) => Val::I64(val),
+            UnguardedVal::F32(val) => Val::F32(val),
+            UnguardedVal::F64(val) => Val::F64(val),
+            UnguardedVal::FuncRef(val) => {
+                Val::FuncRef(unsafe { FuncRef::from_unguarded(val, guard) })
+            }
+            UnguardedVal::ExternRef(val) => {
+                Val::ExternRef(unsafe { ExternRef::from_unguarded(val, guard) })
+            }
+        }
+    }
+
+    fn to_unguarded(self, guard: Self::Guard) -> Self::Unguarded {
+        match self {
+            Val::I32(val) => UnguardedVal::I32(val),
+            Val::I64(val) => UnguardedVal::I64(val),
+            Val::F32(val) => UnguardedVal::F32(val),
+            Val::F64(val) => UnguardedVal::F64(val),
+            Val::FuncRef(val) => UnguardedVal::FuncRef(val.to_unguarded(guard)),
+            Val::ExternRef(val) => UnguardedVal::ExternRef(val.to_unguarded(guard)),
+        }
+    }
+}
+
 
 /// An unguarded [`Val`].
 #[derive(Clone, Copy, Debug, PartialEq)]

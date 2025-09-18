@@ -11,6 +11,7 @@ use {
         extern_val::{ExternType, ExternTypeDesc, ExternVal, ExternValDesc},
         func::{Func, FuncType},
         global::{Global, GlobalType},
+        guarded::Guarded,
         instance::{Instance, InstanceIniter},
         linker::{InstantiateError, Linker},
         mem::{Mem, MemType},
@@ -194,8 +195,8 @@ impl Module {
         store: &mut Store,
         linker: &Linker,
     ) -> Result<Instance, Error> {
-        let instance = Instance::uninited(store.id());
-        let mut initer = InstanceIniter::new(store.id());
+        let instance = Instance::uninited(store.guard());
+        let mut initer = InstanceIniter::new(store.guard());
         for type_ in self.types.iter() {
             initer.push_type(store.get_or_intern_type(type_));
         }
@@ -245,7 +246,7 @@ impl Module {
                             elem.evaluate(store, &initer)
                                 .to_func_ref()
                                 .unwrap()
-                                .to_unguarded(store.id())
+                                .to_unguarded(store.guard())
                         })
                         .collect(),
                 ),
@@ -256,7 +257,7 @@ impl Module {
                             elem.evaluate(store, &initer)
                                 .to_extern_ref()
                                 .unwrap()
-                                .to_unguarded(store.id())
+                                .to_unguarded(store.guard())
                         })
                         .collect(),
                 ),

@@ -11,6 +11,7 @@ use {
         func::{Func, FuncEntity, UnguardedFunc},
         func_ref::UnguardedFuncRef,
         global::UnguardedGlobal,
+        guarded::Guarded,
         mem::UnguardedMem,
         ops::*,
         stack::{Stack, StackGuard, StackSlot},
@@ -173,7 +174,7 @@ pub(crate) fn exec(
     // Copy the arguments to the stack.
     let mut ptr = stack.ptr();
     for arg in args.iter().copied() {
-        let arg = arg.to_unguarded(store.id());
+        let arg = arg.to_unguarded(store.guard());
         unsafe {
             arg.write_to_stack(ptr);
             ptr = ptr.add(1);
@@ -276,7 +277,7 @@ pub(crate) fn exec(
         unsafe {
             *result = Val::from_unguarded(
                 UnguardedVal::read_from_stack(ptr, result.type_()),
-                store.id(),
+                store.guard(),
             );
             ptr = ptr.add(1);
         }
@@ -633,12 +634,12 @@ threaded_instr!(call_indirect(
     if func
         .as_ref()
         .type_()
-        .to_unguarded((*(*cx).store).id())
+        .to_unguarded((*(*cx).store).guard())
         != type_
     {
         return ControlFlow::Trap(Trap::TypeMismatch).to_bits();
     }
-    Func(Handle::from_unguarded(func, (*(*cx).store).id())).compile(&mut *(*cx).store);
+    Func(Handle::from_unguarded(func, (*(*cx).store).guard())).compile(&mut *(*cx).store);
     match func.as_mut() {
         FuncEntity::Wasm(func) => {
             let Code::Compiled(code) = func.code_mut() else {
@@ -3941,7 +3942,7 @@ threaded_instr!(compile(
     cx: Cx,
 ) -> ControlFlowBits {
     let mut func: UnguardedFunc = *ip.cast();
-    Func(Handle::from_unguarded(func, (*(*cx).store).id())).compile((*cx).store);
+    Func(Handle::from_unguarded(func, (*(*cx).store).guard())).compile((*cx).store);
     let FuncEntity::Wasm(func) = func.as_mut() else {
         hint::unreachable_unchecked();
     };

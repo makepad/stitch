@@ -5,9 +5,10 @@ use {
         elem::{Elem, ElemEntity, ElemEntityT},
         extern_ref::UnguardedExternRef,
         func_ref::UnguardedFuncRef,
+        guarded::Guarded,
         limits::Limits,
         ref_::{Ref, RefType, UnguardedRef},
-        store::{Handle, HandlePair, Store, StoreId, UnguardedHandle},
+        store::{Handle, HandlePair, Store, StoreGuard, UnguardedHandle},
         trap::Trap,
     },
     std::{error::Error, fmt},
@@ -33,7 +34,7 @@ impl Table {
     /// - If the initialization [`Ref`] is not owned by the given [`Store`].
     pub fn new(store: &mut Store, type_: TableType, val: Ref) -> Result<Self, TableError> {
         assert!(type_.is_valid(), "invalid table type");
-        unsafe { Self::new_unguarded(store, type_, val.to_unguarded(store.id())) }
+        unsafe { Self::new_unguarded(store, type_, val.to_unguarded(store.guard())) }
     }
 
     /// An unguarded version of [`Table::new`].
@@ -74,7 +75,7 @@ impl Table {
     /// - If the access is out of bounds.
     pub fn get(self, store: &Store, idx: u32) -> Option<Ref> {
         self.get_unguarded(store, idx)
-            .map(|val| unsafe { Ref::from_unguarded(val, store.id()) })
+            .map(|val| unsafe { Ref::from_unguarded(val, store.guard()) })
     }
 
     /// An unguarded version of [`Table::get`].
@@ -97,7 +98,7 @@ impl Table {
     ///
     /// - If the given [`Ref`] is not owned by the given [`Store`].
     pub fn set(self, store: &mut Store, idx: u32, val: Ref) -> Result<(), TableError> {
-        unsafe { self.set_unguarded(store, idx, val.to_unguarded(store.id())) }
+        unsafe { self.set_unguarded(store, idx, val.to_unguarded(store.guard())) }
     }
 
     /// An unguarded version of [`Table::set`].
@@ -136,7 +137,7 @@ impl Table {
     ///
     /// - If the given initialization [`Ref`] is not owned by the given [`Store`].
     pub fn grow(self, store: &mut Store, val: Ref, count: u32) -> Result<(), TableError> {
-        unsafe { self.grow_unguarded(store, val.to_unguarded(store.id()), count) }
+        unsafe { self.grow_unguarded(store, val.to_unguarded(store.guard()), count) }
     }
 
     /// An unguarded version of [`Table::grow`].
@@ -173,23 +174,18 @@ impl Table {
             _ => panic!(),
         }
     }
+}
 
-    /// Converts the given [`UnguardedTable`] to a [`Table`].
-    ///
-    /// # Safety
-    ///
-    /// The given [`UnguardedTable`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(table: UnguardedTable, store_id: StoreId) -> Self {
-        Self(Handle::from_unguarded(table, store_id))
+impl Guarded for Table {
+    type Unguarded = UnguardedTable;
+    type Guard = StoreGuard;
+
+    unsafe fn from_unguarded(unguarded: Self::Unguarded, guard: Self::Guard) -> Self {
+        Self(Handle::from_unguarded(unguarded, guard))
     }
 
-    /// Converts this [`Table`] to an [`UnguardedTable`].
-    ///
-    /// # Panics
-    ///
-    /// This [`Table`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedTable {
-        self.0.to_unguarded(store_id)
+    fn to_unguarded(self, guard: Self::Guard) -> Self::Unguarded {
+        self.0.to_unguarded(guard)
     }
 }
 

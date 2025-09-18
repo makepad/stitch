@@ -4,7 +4,8 @@ use {
         downcast::{DowncastMut, DowncastRef},
         extern_ref::UnguardedExternRef,
         func_ref::UnguardedFuncRef,
-        store::{Handle, Store, StoreId, UnguardedHandle},
+        guarded::Guarded,
+        store::{Handle, Store, StoreGuard, UnguardedHandle},
         val::{UnguardedVal, Val, ValType},
     },
     std::{error::Error, fmt},
@@ -28,7 +29,7 @@ impl Global {
     ///
     /// If the initialization [`Val`] is not owned by the given [`Store`].
     pub fn new(store: &mut Store, type_: GlobalType, val: Val) -> Result<Self, GlobalError> {
-        unsafe { Global::new_unguarded(store, type_, val.to_unguarded(store.id())) }
+        unsafe { Global::new_unguarded(store, type_, val.to_unguarded(store.guard())) }
     }
 
     /// An unguarded version of [`Global::new`].
@@ -92,7 +93,7 @@ impl Global {
 
     /// Returns the value of this [`Global`].
     pub fn get(self, store: &Store) -> Val {
-        unsafe { Val::from_unguarded(self.get_unguarded(store), store.id()) }
+        unsafe { Val::from_unguarded(self.get_unguarded(store), store.guard()) }
     }
 
     /// An unguarded version of [`Global::get`].
@@ -118,7 +119,7 @@ impl Global {
     ///
     /// If the given [`Val`] is not owned by the given [`Store`].
     pub fn set(self, store: &mut Store, val: Val) -> Result<(), GlobalError> {
-        unsafe { self.set_unguarded(store, val.to_unguarded(store.id())) }
+        unsafe { self.set_unguarded(store, val.to_unguarded(store.guard())) }
     }
 
     /// An unguarded version of [`Global::set`].
@@ -136,23 +137,18 @@ impl Global {
             _ => Err(GlobalError::ValTypeMismatch),
         }
     }
+}
 
-    /// Converts the given [`UnguardedGlobal`] to a [`Global`].
-    ///
-    /// # Safety
-    ///
-    /// The given [`UnguardedGlobal`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(global: UnguardedGlobal, store_id: StoreId) -> Self {
-        Self(Handle::from_unguarded(global, store_id))
+impl Guarded for Global {
+    type Unguarded = UnguardedGlobal;
+    type Guard = StoreGuard;
+
+    unsafe fn from_unguarded(unguarded: Self::Unguarded, guard: Self::Guard) -> Self {
+        Self(Handle::from_unguarded(unguarded, guard))
     }
 
-    /// Converts this [`Global`] to an [`UnguardedGlobal`].
-    ///
-    /// # Panics
-    ///
-    /// If this [`Global`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedGlobal {
-        self.0.to_unguarded(store_id).into()
+    fn to_unguarded(self, guard: Self::Guard) -> Self::Unguarded {
+        self.0.to_unguarded(guard).into()
     }
 }
 

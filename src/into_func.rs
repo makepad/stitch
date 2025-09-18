@@ -3,8 +3,9 @@ use crate::{
     extern_ref::{ExternRef, UnguardedExternRef},
     func::{FuncType, HostFuncTrampoline},
     func_ref::{FuncRef, UnguardedFuncRef},
+    guarded::Guarded,
     stack::{Stack, StackGuard, StackSlot},
-    store::{Store, StoreId},
+    store::{Store, StoreGuard},
     val::ValType,
 };
 
@@ -81,14 +82,14 @@ macro_rules! impl_into_fund {
                     HostFuncTrampoline::new(move |store, mut stack| -> Result<StackGuard, Error> {
                         let ($($Ti,)*) = unsafe {
                             let mut ptr = stack.ptr().offset(-(call_frame_size as isize));
-                            Self::Params::read_from_stack(&mut ptr, store.id())
+                            Self::Params::read_from_stack(&mut ptr, store.guard())
                         };
                         drop(stack);
                         let results = self(store, $($Ti,)*).into_result()?;
                         let mut stack = Stack::lock();
                         unsafe {
                             let mut ptr = stack.ptr().offset(-(call_frame_size as isize));
-                            results.write_to_stack(&mut ptr, store.id())
+                            results.write_to_stack(&mut ptr, store.guard())
                         }
                         Ok(stack)
                     })
@@ -150,9 +151,9 @@ pub trait HostValList {
 
     fn types() -> Self::Types;
 
-    unsafe fn read_from_stack(ptr: &mut *mut StackSlot, store_id: StoreId) -> Self;
+    unsafe fn read_from_stack(ptr: &mut *mut StackSlot, store_guard: StoreGuard) -> Self;
 
-    unsafe fn write_to_stack(self, ptr: &mut *mut StackSlot, store_id: StoreId);
+    unsafe fn write_to_stack(self, ptr: &mut *mut StackSlot, store_guard: StoreGuard);
 }
 
 impl<T> HostValList for T
@@ -165,12 +166,12 @@ where
         [<T as HostVal>::type_()]
     }
 
-    unsafe fn read_from_stack(ptr: &mut *mut StackSlot, store_id: StoreId) -> Self {
-        T::read_from_stack(ptr, store_id)
+    unsafe fn read_from_stack(ptr: &mut *mut StackSlot, store_guard: StoreGuard) -> Self {
+        T::read_from_stack(ptr, store_guard)
     }
 
-    unsafe fn write_to_stack(self, ptr: &mut *mut StackSlot, store_id: StoreId) {
-        <Self as HostVal>::write_to_stack(self, ptr, store_id);
+    unsafe fn write_to_stack(self, ptr: &mut *mut StackSlot, store_guard: StoreGuard) {
+        <Self as HostVal>::write_to_stack(self, ptr, store_guard);
     }
 }
 
@@ -187,15 +188,15 @@ macro_rules! impl_host_val_list {
             }
 
             #[allow(unused_variables)]
-            unsafe fn read_from_stack(ptr: &mut *mut StackSlot, store_id: StoreId) -> Self {
-                ($($Ti::read_from_stack(ptr, store_id),)*)
+            unsafe fn read_from_stack(ptr: &mut *mut StackSlot, store_guard: StoreGuard) -> Self {
+                ($($Ti::read_from_stack(ptr, store_guard),)*)
             }
 
             #[allow(non_snake_case)]
             #[allow(unused_variables)]
-            unsafe fn write_to_stack(self, ptr: &mut *mut StackSlot, store_id: StoreId) {
+            unsafe fn write_to_stack(self, ptr: &mut *mut StackSlot, store_guard: StoreGuard) {
                 let ($($Ti,)*) = self;
-                $($Ti.write_to_stack(ptr, store_id);)*
+                $($Ti.write_to_stack(ptr, store_guard);)*
             }
         }
     }
@@ -206,9 +207,9 @@ for_each_tuple!(impl_host_val_list);
 pub trait HostVal {
     fn type_() -> ValType;
 
-    unsafe fn read_from_stack(ptr: &mut *mut StackSlot, store_id: StoreId) -> Self;
+    unsafe fn read_from_stack(ptr: &mut *mut StackSlot, store_guard: StoreGuard) -> Self;
 
-    unsafe fn write_to_stack(self, ptr: &mut *mut StackSlot, store_id: StoreId);
+    unsafe fn write_to_stack(self, ptr: &mut *mut StackSlot, store_guard: StoreGuard);
 }
 
 macro_rules! impl_host_val {
@@ -218,13 +219,13 @@ macro_rules! impl_host_val {
                 ValType::$ValType
             }
 
-            unsafe fn read_from_stack(ptr: &mut *mut StackSlot, _store_id: StoreId) -> Self {
+            unsafe fn read_from_stack(ptr: &mut *mut StackSlot, _store_guard: StoreGuard) -> Self {
                 let val = *ptr.cast::<$T>();
                 *ptr = ptr.add(1);
                 val
             }
 
-            unsafe fn write_to_stack(self, ptr: &mut *mut StackSlot, _store_id: StoreId) {
+            unsafe fn write_to_stack(self, ptr: &mut *mut StackSlot, _store_guard: StoreGuard) {
                 *ptr.cast::<$T>() = self;
                 *ptr = ptr.add(1);
             }
@@ -239,14 +240,14 @@ macro_rules! impl_host_val_raw {
                 ValType::$ValType
             }
 
-            unsafe fn read_from_stack(ptr: &mut *mut StackSlot, store_id: StoreId) -> Self {
-                let val = <$T>::from_unguarded(*ptr.cast::<$RawT>(), store_id);
+            unsafe fn read_from_stack(ptr: &mut *mut StackSlot, store_guard: StoreGuard) -> Self {
+                let val = <$T>::from_unguarded(*ptr.cast::<$RawT>(), store_guard);
                 *ptr = ptr.add(1);
                 val
             }
 
-            unsafe fn write_to_stack(self, ptr: &mut *mut StackSlot, store_id: StoreId) {
-                *ptr.cast::<$RawT>() = self.to_unguarded(store_id);
+            unsafe fn write_to_stack(self, ptr: &mut *mut StackSlot, store_guard: StoreGuard) {
+                *ptr.cast::<$RawT>() = self.to_unguarded(store_guard);
                 *ptr = ptr.add(1);
             }
         }

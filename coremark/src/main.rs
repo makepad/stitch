@@ -23,6 +23,7 @@ fn stitch(bytes: &[u8]) -> f32 {
     results[0].to_f32().unwrap()
 }
 
+/*
 fn wasm3(bytes: &[u8]) -> f32 {
     use wasm3::Environment;
 
@@ -37,6 +38,7 @@ fn wasm3(bytes: &[u8]) -> f32 {
     let run = module.find_function::<(), f32>("run").unwrap();
     run.call().unwrap()
 }
+*/
 
 fn wasmi(bytes: &[u8]) -> f32 {
     use wasmi::{core::F32, *};
@@ -78,7 +80,7 @@ fn wasmtime(bytes: &[u8]) -> f32 {
 fn main() {
     let bytes = include_bytes!("coremark-minimal.wasm");
     println!("stitch {}", stitch(bytes));
-    println!("wasm3 {}", wasm3(bytes));
+    // println!("wasm3 {}", wasm3(bytes));
     println!("wasmi {}", wasmi(bytes));
     println!("wasmtime {}", wasmtime(bytes));
 }

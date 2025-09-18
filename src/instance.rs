@@ -6,8 +6,9 @@ use {
         extern_val::{ExternVal, UnguardedExternVal},
         func::{Func, UnguardedFunc},
         global::{Global, UnguardedGlobal},
+        guarded::Guarded,
         mem::{Mem, UnguardedMem},
-        store::{InternedFuncType, StoreId, UnguardedInternedFuncType},
+        store::{InternedFuncType, StoreGuard, UnguardedInternedFuncType},
         table::{Table, UnguardedTable},
     },
     std::{
@@ -20,7 +21,7 @@ use {
 /// A [`Module`](`crate::Module`) instance.
 #[derive(Clone, Debug)]
 pub struct Instance {
-    store_id: StoreId,
+    store_guard: StoreGuard,
     inner: Arc<OnceCell<InstanceInner>>,
 }
 
@@ -30,7 +31,7 @@ impl Instance {
         self.inner()
             .exports
             .get(name)
-            .map(|val| unsafe { ExternVal::from_unguarded(*val, self.store_id) })
+            .map(|val| unsafe { ExternVal::from_unguarded(*val, self.store_guard) })
     }
 
     /// Returns the exported [`Func`] with the given name in this [`Instance`], if it exists.
@@ -56,22 +57,22 @@ impl Instance {
     /// Returns an iterator over the exports in this [`Instance`].
     pub fn exports(&self) -> InstanceExports<'_> {
         InstanceExports {
-            store_id: self.store_id,
+            store_guard: self.store_guard,
             iter: self.inner().exports.iter(),
         }
     }
 
     /// Creates an uninitialized [`Instance`].
-    pub(crate) fn uninited(store_id: StoreId) -> Instance {
+    pub(crate) fn uninited(store_guard: StoreGuard) -> Instance {
         Instance {
-            store_id,
+            store_guard,
             inner: Arc::new(OnceCell::new()),
         }
     }
 
     /// Initialize this [`Instance`] with the given [`InstanceIniter`].
     pub(crate) fn init(&self, initer: InstanceIniter) {
-        assert_eq!(initer.store_id, self.store_id);
+        assert_eq!(initer.store_guard, self.store_guard);
         self.inner
             .set(InstanceInner {
                 types: initer.types.into(),
@@ -91,13 +92,13 @@ impl Instance {
         self.inner()
             .types
             .get(idx as usize)
-            .map(|type_| unsafe { InternedFuncType::from_unguarded(*type_, self.store_id) })
+            .map(|type_| unsafe { InternedFuncType::from_unguarded(*type_, self.store_guard) })
     }
 
     /// Returns the [`Func`] at the given index in this [`Instance`], if it exists.
     pub(crate) fn func(&self, idx: u32) -> Option<Func> {
         self.unguarded_func(idx)
-            .map(|func| unsafe { Func::from_unguarded(func, self.store_id) })
+            .map(|func| unsafe { Func::from_unguarded(func, self.store_guard) })
     }
 
     /// An unguarded version of [`Instance::func`].
@@ -108,7 +109,7 @@ impl Instance {
     /// Returns the [`Table`] at the given index in this [`Instance`], if it exists.
     pub(crate) fn table(&self, idx: u32) -> Option<Table> {
         self.unguarded_table(idx)
-            .map(|table| unsafe { Table::from_unguarded(table, self.store_id) })
+            .map(|table| unsafe { Table::from_unguarded(table, self.store_guard) })
     }
 
     /// An unguarded version of [`Instance::table`].
@@ -119,7 +120,7 @@ impl Instance {
     /// Returns the [`Mem`] at the given index in this [`Instance`], if it exists.
     pub(crate) fn mem(&self, idx: u32) -> Option<Mem> {
         self.unguarded_mem(idx)
-            .map(|mem| unsafe { Mem::from_unguarded(mem, self.store_id) })
+            .map(|mem| unsafe { Mem::from_unguarded(mem, self.store_guard) })
     }
 
     /// An unguarded version of [`Instance::mem`].
@@ -130,7 +131,7 @@ impl Instance {
     /// Returns the [`Global`] at the given index in this [`Instance`], if it exists.
     pub(crate) fn global(&self, idx: u32) -> Option<Global> {
         self.unguarded_global(idx)
-            .map(|global| unsafe { Global::from_unguarded(global, self.store_id) })
+            .map(|global| unsafe { Global::from_unguarded(global, self.store_guard) })
     }
 
     /// An unguarded version of [`Instance::global`].
@@ -141,7 +142,7 @@ impl Instance {
     /// Returns the [`Elem`] at the given index in this [`Instance`], if it exists.
     pub(crate) fn elem(&self, idx: u32) -> Option<Elem> {
         self.unguarded_elem(idx)
-            .map(|elem| unsafe { Elem::from_unguarded(elem, self.store_id) })
+            .map(|elem| unsafe { Elem::from_unguarded(elem, self.store_guard) })
     }
 
     /// An unguarded version of [`Instance::elem`].
@@ -152,7 +153,7 @@ impl Instance {
     /// Returns the [`Data`] at the given index in this [`Instance`], if it exists.
     pub(crate) fn data(&self, idx: u32) -> Option<Data> {
         self.unguarded_data(idx)
-            .map(|data| unsafe { Data::from_unguarded(data, self.store_id) })
+            .map(|data| unsafe { Data::from_unguarded(data, self.store_guard) })
     }
 
     /// An unguarded version of [`Instance::data`].
@@ -178,7 +179,7 @@ impl EvaluationContext for Instance {
 /// An iterator over the exports in an [`Instance`].
 #[derive(Clone, Debug)]
 pub struct InstanceExports<'a> {
-    store_id: StoreId,
+    store_guard: StoreGuard,
     iter: hash_map::Iter<'a, Arc<str>, UnguardedExternVal>,
 }
 
@@ -188,7 +189,7 @@ impl<'a> Iterator for InstanceExports<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next().map(|(name, val)| {
             (&**name, unsafe {
-                ExternVal::from_unguarded(*val, self.store_id)
+                ExternVal::from_unguarded(*val, self.store_guard)
             })
         })
     }
@@ -209,7 +210,7 @@ struct InstanceInner {
 /// An initializer for an [`Instance`].
 #[derive(Debug)]
 pub(crate) struct InstanceIniter {
-    store_id: StoreId,
+    store_guard: StoreGuard,
     types: Vec<UnguardedInternedFuncType>,
     funcs: Vec<UnguardedFunc>,
     tables: Vec<UnguardedTable>,
@@ -222,7 +223,7 @@ pub(crate) struct InstanceIniter {
 
 impl InstanceIniter {
     /// Creates a new [`InstanceIniter`].
-    pub(crate) fn new(store_id: StoreId) -> InstanceIniter {
+    pub(crate) fn new(store_guard: StoreGuard) -> InstanceIniter {
         InstanceIniter {
             types: Vec::new(),
             funcs: Vec::new(),
@@ -232,14 +233,14 @@ impl InstanceIniter {
             elems: Vec::new(),
             datas: Vec::new(),
             exports: HashMap::new(),
-            store_id,
+            store_guard,
         }
     }
 
     /// Returns the [`Func`] at the given index in this [`InstanceIniter`], if it exists.
     pub(crate) fn func(&self, idx: u32) -> Option<Func> {
         self.unguarded_func(idx)
-            .map(|func| unsafe { Func::from_unguarded(func, self.store_id) })
+            .map(|func| unsafe { Func::from_unguarded(func, self.store_guard) })
     }
 
     /// An unguarded version of [`InstanceIniter::func`].
@@ -250,7 +251,7 @@ impl InstanceIniter {
     /// Returns the [`Table`] at the given index in this [`InstanceIniter`], if it exists.
     pub(crate) fn table(&self, idx: u32) -> Option<Table> {
         self.unguarded_table(idx)
-            .map(|table| unsafe { Table::from_unguarded(table, self.store_id) })
+            .map(|table| unsafe { Table::from_unguarded(table, self.store_guard) })
     }
 
     /// An unguarded version of [`InstanceIniter::table`].
@@ -261,7 +262,7 @@ impl InstanceIniter {
     /// Returns the [`Mem`] at the given index in this [`InstanceIniter`], if it exists.
     pub(crate) fn mem(&self, idx: u32) -> Option<Mem> {
         self.unguarded_mem(idx)
-            .map(|mem| unsafe { Mem::from_unguarded(mem, self.store_id) })
+            .map(|mem| unsafe { Mem::from_unguarded(mem, self.store_guard) })
     }
 
     /// An unguarded version of [`InstanceIniter::mem`].
@@ -272,7 +273,7 @@ impl InstanceIniter {
     /// Returns the [`Global`] at the given index in this [`InstanceIniter`], if it exists.
     pub(crate) fn global(&self, idx: u32) -> Option<Global> {
         self.unguarded_global(idx)
-            .map(|global| unsafe { Global::from_unguarded(global, self.store_id) })
+            .map(|global| unsafe { Global::from_unguarded(global, self.store_guard) })
     }
 
     fn unguarded_global(&self, idx: u32) -> Option<UnguardedGlobal> {
@@ -281,42 +282,42 @@ impl InstanceIniter {
 
     /// Appends the given [`InternedFuncType`] to this [`InstanceIniter`].
     pub(crate) fn push_type(&mut self, type_: InternedFuncType) {
-        self.types.push(type_.to_unguarded(self.store_id));
+        self.types.push(type_.to_unguarded(self.store_guard));
     }
 
     /// Appends the given [`Func`] to this [`InstanceIniter`].
     pub(crate) fn push_func(&mut self, func: Func) {
-        self.funcs.push(func.to_unguarded(self.store_id));
+        self.funcs.push(func.to_unguarded(self.store_guard));
     }
 
     /// Appends the given [`Table`] to this [`InstanceIniter`].
     pub(crate) fn push_table(&mut self, table: Table) {
-        self.tables.push(table.to_unguarded(self.store_id));
+        self.tables.push(table.to_unguarded(self.store_guard));
     }
 
     /// Appends the given [`Mem`] to this [`InstanceIniter`].
     pub(crate) fn push_mem(&mut self, mem: Mem) {
-        self.mems.push(mem.to_unguarded(self.store_id));
+        self.mems.push(mem.to_unguarded(self.store_guard));
     }
 
     /// Appends the given [`Global`] to this [`InstanceIniter`].
     pub(crate) fn push_global(&mut self, global: Global) {
-        self.globals.push(global.to_unguarded(self.store_id));
+        self.globals.push(global.to_unguarded(self.store_guard));
     }
 
     /// Appends the given [`Elem`] to this [`InstanceIniter`].
     pub(crate) fn push_elem(&mut self, elem: Elem) {
-        self.elems.push(elem.to_unguarded(self.store_id));
+        self.elems.push(elem.to_unguarded(self.store_guard));
     }
 
     /// Appends the given [`Data`] to this [`InstanceIniter`].
     pub(crate) fn push_data(&mut self, data: Data) {
-        self.datas.push(data.to_unguarded(self.store_id));
+        self.datas.push(data.to_unguarded(self.store_guard));
     }
 
     /// Appends an export with the given name and [`ExternVal`] to this [`InstanceIniter`].
     pub(crate) fn push_export(&mut self, name: Arc<str>, val: ExternVal) {
-        self.exports.insert(name, val.to_unguarded(self.store_id));
+        self.exports.insert(name, val.to_unguarded(self.store_guard));
     }
 }
 

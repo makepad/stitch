@@ -1,5 +1,8 @@
 use {
-    crate::store::{Handle, Store, StoreId, UnguardedHandle},
+    crate::{
+        guarded::Guarded,
+        store::{Handle, Store, StoreGuard, UnguardedHandle}
+    },
     std::sync::Arc,
 };
 
@@ -16,13 +19,18 @@ impl Data {
     pub(crate) fn drop_bytes(self, store: &mut Store) {
         self.0.as_mut(store).drop_bytes();
     }
+}
 
-    pub(crate) unsafe fn from_unguarded(data: UnguardedData, store_id: StoreId) -> Self {
-        Self(Handle::from_unguarded(data, store_id))
+impl Guarded for Data {
+    type Unguarded = UnguardedData;
+    type Guard = StoreGuard;
+
+    unsafe fn from_unguarded(unguarded: Self::Unguarded, guard: Self::Guard) -> Self {
+        Self(Handle::from_unguarded(unguarded, guard))
     }
 
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedData {
-        self.0.to_unguarded(store_id)
+    fn to_unguarded(self, guard: Self::Guard) -> Self::Unguarded {
+        self.0.to_unguarded(guard)
     }
 }
 

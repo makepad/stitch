@@ -6,6 +6,7 @@ use {
         engine::Engine,
         extern_::ExternEntity,
         func::{FuncEntity, FuncType},
+        guarded::Guarded,
         global::GlobalEntity,
         mem::MemEntity,
         table::TableEntity,
@@ -22,7 +23,7 @@ use {
 #[derive(Debug)]
 pub struct Store {
     engine: Engine,
-    id: StoreId,
+    id: StoreGuard,
     types: FuncTypeInterner,
     funcs: Vec<AliasableBox<FuncEntity>>,
     tables: Vec<AliasableBox<TableEntity>>,
@@ -35,7 +36,7 @@ pub struct Store {
 
 impl Store {
     pub fn new(engine: Engine) -> Self {
-        let id = StoreId::new();
+        let id = StoreGuard::new();
         Self {
             engine,
             id,
@@ -54,7 +55,7 @@ impl Store {
         &self.engine
     }
 
-    pub(crate) fn id(&self) -> StoreId {
+    pub(crate) fn guard(&self) -> StoreGuard {
         self.id
     }
 
@@ -140,9 +141,9 @@ impl Store {
 
 /// A unique identifier for a [`Store`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct StoreId(usize);
+pub struct StoreGuard(usize);
 
-impl StoreId {
+impl StoreGuard {
     pub(crate) fn new() -> Self {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -158,21 +159,24 @@ impl StoreId {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct InternedFuncType {
-    type_: UnguardedInternedFuncType,
-    store_id: StoreId,
+    unguarded: UnguardedInternedFuncType,
+    guard: StoreGuard,
 }
 
-impl InternedFuncType {
-    pub(crate) unsafe fn from_unguarded(
-        type_: UnguardedInternedFuncType,
-        store_id: StoreId,
+impl Guarded for InternedFuncType {
+    type Unguarded = UnguardedInternedFuncType;
+    type Guard = StoreGuard;
+    
+    unsafe fn from_unguarded(
+        unguarded: UnguardedInternedFuncType,
+        guard: StoreGuard,
     ) -> Self {
-        Self { type_, store_id }
+        Self { unguarded, guard }
     }
 
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedInternedFuncType {
-        assert_eq!(store_id, self.store_id);
-        self.type_
+    fn to_unguarded(self, store_guard: StoreGuard) -> UnguardedInternedFuncType {
+        assert_eq!(store_guard, self.guard);
+        self.unguarded
     }
 }
 
@@ -181,30 +185,18 @@ pub(crate) struct UnguardedInternedFuncType(usize);
 
 pub(crate) struct Handle<T> {
     unguarded: UnguardedHandle<T>,
-    store_id: StoreId,
+    guard: StoreGuard,
 }
 
 impl<T> Handle<T> {
     pub(crate) fn as_ref(self, store: &Store) -> &T {
-        assert_eq!(store.id, self.store_id, "store mismatch");
+        assert!(self.guard == store.guard(), "store mismatch");
         unsafe { self.unguarded.as_ref() }
     }
 
     pub(crate) fn as_mut(mut self, store: &mut Store) -> &mut T {
-        assert_eq!(store.id, self.store_id, "store mismatch");
+        assert!(self.guard == store.guard(), "store mismatch");
         unsafe { self.unguarded.as_mut() }
-    }
-
-    pub(crate) unsafe fn from_unguarded(unguarded: UnguardedHandle<T>, store_id: StoreId) -> Self {
-        Self {
-            unguarded,
-            store_id,
-        }
-    }
-
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedHandle<T> {
-        assert_eq!(store_id, self.store_id);
-        self.unguarded
     }
 }
 
@@ -220,12 +212,29 @@ impl<T> fmt::Debug for Handle<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Handle")
             .field("handle", &self.unguarded)
-            .field("store_id", &self.store_id)
+            .field("store_guard", &self.guard)
             .finish()
     }
 }
 
 impl<T> Eq for Handle<T> {}
+
+impl<T> Guarded for Handle<T> {
+    type Unguarded = UnguardedHandle<T>;
+    type Guard = StoreGuard;
+
+    unsafe fn from_unguarded(unguarded: UnguardedHandle<T>, store_guard: StoreGuard) -> Self {
+        Self {
+            unguarded,
+            guard: store_guard,
+        }
+    }
+
+    fn to_unguarded(self, store_guard: StoreGuard) -> UnguardedHandle<T> {
+        assert_eq!(store_guard, self.guard);
+        self.unguarded
+    }
+}
 
 impl<T> Hash for Handle<T> {
     fn hash<H>(&self, state: &mut H)
@@ -233,7 +242,7 @@ impl<T> Hash for Handle<T> {
         H: Hasher,
     {
         self.unguarded.hash(state);
-        self.store_id.hash(state);
+        self.guard.hash(state);
     }
 }
 
@@ -242,7 +251,7 @@ impl<T> PartialEq for Handle<T> {
         if self.unguarded != other.unguarded {
             return false;
         }
-        if self.store_id != other.store_id {
+        if self.guard != other.guard {
             return false;
         }
         true
@@ -256,8 +265,8 @@ pub(crate) struct HandlePair<T, U>(pub(crate) Handle<T>, pub(crate) Handle<U>);
 
 impl<T, U> HandlePair<T, U> {
     pub(crate) fn as_mut_pair(mut self, store: &Store) -> (&mut T, &mut U) {
-        assert_eq!(store.id(), self.0.store_id, "store mismatch");
-        assert_eq!(store.id(), self.1.store_id, "store mismatch");
+        assert_eq!(store.guard(), self.0.guard, "store mismatch");
+        assert_eq!(store.guard(), self.1.guard, "store mismatch");
         assert_ne!(
             self.0.unguarded.as_ptr() as usize,
             self.1.unguarded.as_ptr() as usize,
@@ -269,22 +278,22 @@ impl<T, U> HandlePair<T, U> {
 
 #[derive(Debug)]
 struct FuncTypeInterner {
-    store_id: StoreId,
+    store_guard: StoreGuard,
     types: Vec<FuncType>,
     interned_types: HashMap<FuncType, UnguardedInternedFuncType>,
 }
 
 impl FuncTypeInterner {
-    fn new(store_id: StoreId) -> Self {
+    fn new(store_guard: StoreGuard) -> Self {
         Self {
-            store_id,
+            store_guard,
             types: Vec::new(),
             interned_types: HashMap::new(),
         }
     }
 
     fn resolve(&self, type_: InternedFuncType) -> &FuncType {
-        unsafe { self.resolve_unguarded(type_.to_unguarded(self.store_id)) }
+        unsafe { self.resolve_unguarded(type_.to_unguarded(self.store_guard)) }
     }
 
     /// An unguarded version of `FuncInterner::resolve`.
@@ -294,8 +303,8 @@ impl FuncTypeInterner {
 
     fn get_or_intern(&mut self, type_: &FuncType) -> InternedFuncType {
         InternedFuncType {
-            type_: self.get_or_intern_unguarded(type_),
-            store_id: self.store_id,
+            unguarded: self.get_or_intern_unguarded(type_),
+            guard: self.store_guard,
         }
     }
 
