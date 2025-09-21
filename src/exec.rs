@@ -2920,13 +2920,13 @@ macro_rules! bin_op_noncommutative {
     };
 }
 
-un_op!(i32_eqz_s, i32_eqz_r, <u32 as IntOps>::eqz);
+un_op!(i32_eqz_s, i32_eqz_r, <Eqz as UnOp<i32>>::un_op);
 bin_op!(
     i32_eq_ss,
     i32_eq_rs,
     i32_eq_is,
     i32_eq_ir,
-    <u32 as RelOps>::eq
+    <Eq as BinOp<i32>>::bin_op
 );
 
 bin_op!(
@@ -2934,7 +2934,7 @@ bin_op!(
     i32_ne_rs,
     i32_ne_is,
     i32_ne_ir,
-    <u32 as RelOps>::ne
+    <Ne as BinOp<i32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_lt_s_ss,
@@ -2944,7 +2944,7 @@ bin_op_noncommutative!(
     i32_lt_s_sr,
     i32_lt_s_si,
     i32_lt_s_ri,
-    <i32 as RelOps>::lt
+    <Lt as BinOp<i32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_lt_u_ss,
@@ -2954,7 +2954,7 @@ bin_op_noncommutative!(
     i32_lt_u_sr,
     i32_lt_u_si,
     i32_lt_u_ri,
-    <u32 as RelOps>::lt
+    <Lt as BinOp<u32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_gt_s_ss,
@@ -2964,7 +2964,7 @@ bin_op_noncommutative!(
     i32_gt_s_sr,
     i32_gt_s_si,
     i32_gt_s_ri,
-    <i32 as RelOps>::gt
+    <Gt as BinOp<i32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_gt_u_ss,
@@ -2974,7 +2974,7 @@ bin_op_noncommutative!(
     i32_gt_u_sr,
     i32_gt_u_si,
     i32_gt_u_ri,
-    <u32 as RelOps>::gt
+    <Gt as BinOp<u32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_le_s_ss,
@@ -2984,7 +2984,7 @@ bin_op_noncommutative!(
     i32_le_s_sr,
     i32_le_s_si,
     i32_le_s_ri,
-    <i32 as RelOps>::le
+    <Le as BinOp<i32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_le_u_ss,
@@ -2994,7 +2994,7 @@ bin_op_noncommutative!(
     i32_le_u_sr,
     i32_le_u_si,
     i32_le_u_ri,
-    <u32 as RelOps>::le
+    <Le as BinOp<u32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_ge_s_ss,
@@ -3004,7 +3004,7 @@ bin_op_noncommutative!(
     i32_ge_s_sr,
     i32_ge_s_si,
     i32_ge_s_ri,
-    <i32 as RelOps>::ge
+    <Ge as BinOp<i32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_ge_u_ss,
@@ -3014,23 +3014,23 @@ bin_op_noncommutative!(
     i32_ge_u_sr,
     i32_ge_u_si,
     i32_ge_u_ri,
-    <u32 as RelOps>::ge
+    <Ge as BinOp<u32>>::bin_op
 );
 
-un_op!(i64_eqz_s, i64_eqz_r, <u64 as IntOps>::eqz);
+un_op!(i64_eqz_s, i64_eqz_r, <Eqz as UnOp<i64>>::un_op);
 bin_op!(
     i64_eq_ss,
     i64_eq_rs,
     i64_eq_is,
     i64_eq_ir,
-    <u64 as RelOps>::eq
+    <Eq as BinOp<i64>>::bin_op
 );
 bin_op!(
     i64_ne_ss,
     i64_ne_rs,
     i64_ne_is,
     i64_ne_ir,
-    <u64 as RelOps>::ne
+    <Ne as BinOp<i64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_lt_s_ss,
@@ -3040,7 +3040,7 @@ bin_op_noncommutative!(
     i64_lt_s_sr,
     i64_lt_s_si,
     i64_lt_s_ri,
-    <i64 as RelOps>::lt
+    <Lt as BinOp<i64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_lt_u_ss,
@@ -3050,7 +3050,7 @@ bin_op_noncommutative!(
     i64_lt_u_sr,
     i64_lt_u_si,
     i64_lt_u_ri,
-    <u64 as RelOps>::lt
+    <Lt as BinOp<u64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_gt_s_ss,
@@ -3060,7 +3060,7 @@ bin_op_noncommutative!(
     i64_gt_s_sr,
     i64_gt_s_si,
     i64_gt_s_ri,
-    <i64 as RelOps>::gt
+    <Gt as BinOp<i64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_gt_u_ss,
@@ -3070,7 +3070,7 @@ bin_op_noncommutative!(
     i64_gt_u_sr,
     i64_gt_u_si,
     i64_gt_u_ri,
-    <u64 as RelOps>::gt
+    <Gt as BinOp<u64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_le_s_ss,
@@ -3080,7 +3080,7 @@ bin_op_noncommutative!(
     i64_le_s_sr,
     i64_le_s_si,
     i64_le_s_ri,
-    <i64 as RelOps>::le
+    <Le as BinOp<i64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_le_u_ss,
@@ -3090,7 +3090,7 @@ bin_op_noncommutative!(
     i64_le_u_sr,
     i64_le_u_si,
     i64_le_u_ri,
-    <u64 as RelOps>::le
+    <Le as BinOp<u64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_ge_s_ss,
@@ -3100,7 +3100,7 @@ bin_op_noncommutative!(
     i64_ge_s_sr,
     i64_ge_s_si,
     i64_ge_s_ri,
-    <i64 as RelOps>::ge
+    <Ge as BinOp<i64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_ge_u_ss,
@@ -3110,7 +3110,7 @@ bin_op_noncommutative!(
     i64_ge_u_sr,
     i64_ge_u_si,
     i64_ge_u_ri,
-    <u64 as RelOps>::ge
+    <Ge as BinOp<u64>>::bin_op
 );
 
 bin_op!(
@@ -3118,14 +3118,14 @@ bin_op!(
     f32_eq_rs,
     f32_eq_is,
     f32_eq_ir,
-    <f32 as RelOps>::eq
+    <Eq as BinOp<f32>>::bin_op
 );
 bin_op!(
     f32_ne_ss,
     f32_ne_rs,
     f32_ne_is,
     f32_ne_ir,
-    <f32 as RelOps>::ne
+    <Ne as BinOp<f32>>::bin_op
 );
 bin_op_noncommutative!(
     f32_lt_ss,
@@ -3135,7 +3135,7 @@ bin_op_noncommutative!(
     f32_lt_sr,
     f32_lt_si,
     f32_lt_ri,
-    <f32 as RelOps>::lt
+    <Lt as BinOp<f32>>::bin_op
 );
 bin_op_noncommutative!(
     f32_gt_ss,
@@ -3145,7 +3145,7 @@ bin_op_noncommutative!(
     f32_gt_sr,
     f32_gt_si,
     f32_gt_ri,
-    <f32 as RelOps>::gt
+    <Gt as BinOp<f32>>::bin_op
 );
 bin_op_noncommutative!(
     f32_le_ss,
@@ -3155,7 +3155,7 @@ bin_op_noncommutative!(
     f32_le_sr,
     f32_le_si,
     f32_le_ri,
-    <f32 as RelOps>::le
+    <Le as BinOp<f32>>::bin_op
 );
 bin_op_noncommutative!(
     f32_ge_ss,
@@ -3165,7 +3165,7 @@ bin_op_noncommutative!(
     f32_ge_sr,
     f32_ge_si,
     f32_ge_ri,
-    <f32 as RelOps>::ge
+    <Ge as BinOp<f32>>::bin_op
 );
 
 bin_op!(
@@ -3173,14 +3173,14 @@ bin_op!(
     f64_eq_rs,
     f64_eq_is,
     f64_eq_ir,
-    <f64 as RelOps>::eq
+    <Eq as BinOp<f64>>::bin_op
 );
 bin_op!(
     f64_ne_ss,
     f64_ne_rs,
     f64_ne_is,
     f64_ne_ir,
-    <f64 as RelOps>::ne
+    <Ne as BinOp<f64>>::bin_op
 );
 bin_op_noncommutative!(
     f64_lt_ss,
@@ -3190,7 +3190,7 @@ bin_op_noncommutative!(
     f64_lt_sr,
     f64_lt_si,
     f64_lt_ri,
-    <f64 as RelOps>::lt
+    <Lt as BinOp<f64>>::bin_op
 );
 bin_op_noncommutative!(
     f64_gt_ss,
@@ -3200,7 +3200,7 @@ bin_op_noncommutative!(
     f64_gt_sr,
     f64_gt_si,
     f64_gt_ri,
-    <f64 as RelOps>::gt
+    <Gt as BinOp<f64>>::bin_op
 );
 bin_op_noncommutative!(
     f64_le_ss,
@@ -3210,7 +3210,7 @@ bin_op_noncommutative!(
     f64_le_sr,
     f64_le_si,
     f64_le_ri,
-    <f64 as RelOps>::le
+    <Le as BinOp<f64>>::bin_op
 );
 bin_op_noncommutative!(
     f64_ge_ss,
@@ -3220,18 +3220,18 @@ bin_op_noncommutative!(
     f64_ge_sr,
     f64_ge_si,
     f64_ge_ri,
-    <f64 as RelOps>::ge
+    <Ge as BinOp<f64>>::bin_op
 );
 
-un_op!(i32_clz_s, i32_clz_r, <u32 as IntOps>::clz);
-un_op!(i32_ctz_s, i32_ctz_r, <u32 as IntOps>::ctz);
-un_op!(i32_popcnt_s, i32_popcnt_r, <u32 as IntOps>::popcnt);
+un_op!(i32_clz_s, i32_clz_r, <Clz as UnOp<i32>>::un_op);
+un_op!(i32_ctz_s, i32_ctz_r, <Ctz as UnOp<i32>>::un_op);
+un_op!(i32_popcnt_s, i32_popcnt_r, <Popcnt as UnOp<i32>>::un_op);
 bin_op!(
     i32_add_ss,
     i32_add_rs,
     i32_add_is,
     i32_add_ir,
-    <u32 as IntOps>::add
+    <Add as BinOp<i32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_sub_ss,
@@ -3241,14 +3241,14 @@ bin_op_noncommutative!(
     i32_sub_sr,
     i32_sub_si,
     i32_sub_ri,
-    <u32 as IntOps>::sub
+    <Sub as BinOp<i32>>::bin_op
 );
 bin_op!(
     i32_mul_ss,
     i32_mul_rs,
     i32_mul_is,
     i32_mul_ir,
-    <u32 as IntOps>::mul
+    <Mul as BinOp<i32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_div_s_ss,
@@ -3258,7 +3258,7 @@ bin_op_noncommutative!(
     i32_div_s_sr,
     i32_div_s_si,
     i32_div_s_ri,
-    <i32 as IntOps>::div
+    <Div as BinOp<i32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_div_u_ss,
@@ -3268,7 +3268,7 @@ bin_op_noncommutative!(
     i32_div_u_sr,
     i32_div_u_si,
     i32_div_u_ri,
-    <u32 as IntOps>::div
+    <Div as BinOp<u32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_rem_s_ss,
@@ -3278,7 +3278,7 @@ bin_op_noncommutative!(
     i32_rem_s_sr,
     i32_rem_s_si,
     i32_rem_s_ri,
-    <i32 as IntOps>::rem
+    <Rem as BinOp<i32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_rem_u_ss,
@@ -3288,28 +3288,28 @@ bin_op_noncommutative!(
     i32_rem_u_sr,
     i32_rem_u_si,
     i32_rem_u_ri,
-    <u32 as IntOps>::rem
+    <Rem as BinOp<u32>>::bin_op
 );
 bin_op!(
     i32_and_ss,
     i32_and_rs,
     i32_and_is,
     i32_and_ir,
-    <u32 as IntOps>::and
+    <And as BinOp<i32>>::bin_op
 );
 bin_op!(
     i32_or_ss,
     i32_or_rs,
     i32_or_is,
     i32_or_ir,
-    <u32 as IntOps>::or
+    <Or as BinOp<i32>>::bin_op
 );
 bin_op!(
     i32_xor_ss,
     i32_xor_rs,
     i32_xor_is,
     i32_xor_ir,
-    <u32 as IntOps>::xor
+    <Xor as BinOp<i32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_shl_ss,
@@ -3319,7 +3319,7 @@ bin_op_noncommutative!(
     i32_shl_sr,
     i32_shl_si,
     i32_shl_ri,
-    <u32 as IntOps>::shl
+    <Shl as BinOp<i32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_shr_s_ss,
@@ -3329,7 +3329,7 @@ bin_op_noncommutative!(
     i32_shr_s_sr,
     i32_shr_s_si,
     i32_shr_s_ri,
-    <i32 as IntOps>::shr
+    <Shr as BinOp<i32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_shr_u_ss,
@@ -3339,7 +3339,7 @@ bin_op_noncommutative!(
     i32_shr_u_sr,
     i32_shr_u_si,
     i32_shr_u_ri,
-    <u32 as IntOps>::shr
+    <Shr as BinOp<u32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_rotl_ss,
@@ -3349,7 +3349,7 @@ bin_op_noncommutative!(
     i32_rotl_sr,
     i32_rotl_si,
     i32_rotl_ri,
-    <u32 as IntOps>::rotl
+    <Rotl as BinOp<i32>>::bin_op
 );
 bin_op_noncommutative!(
     i32_rotr_ss,
@@ -3359,18 +3359,18 @@ bin_op_noncommutative!(
     i32_rotr_sr,
     i32_rotr_si,
     i32_rotr_ri,
-    <u32 as IntOps>::rotr
+    <Rotr as BinOp<i32>>::bin_op
 );
 
-un_op!(i64_clz_s, i64_clz_r, <u64 as IntOps>::clz);
-un_op!(i64_ctz_s, i64_ctz_r, <u64 as IntOps>::ctz);
-un_op!(i64_popcnt_s, i64_popcnt_r, <u64 as IntOps>::popcnt);
+un_op!(i64_clz_s, i64_clz_r, <Clz as UnOp<i64>>::un_op);
+un_op!(i64_ctz_s, i64_ctz_r, <Ctz as UnOp<i64>>::un_op);
+un_op!(i64_popcnt_s, i64_popcnt_r, <Popcnt as UnOp<i64>>::un_op);
 bin_op!(
     i64_add_ss,
     i64_add_rs,
     i64_add_is,
     i64_add_ir,
-    <u64 as IntOps>::add
+    <Add as BinOp<i64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_sub_ss,
@@ -3380,14 +3380,14 @@ bin_op_noncommutative!(
     i64_sub_sr,
     i64_sub_si,
     i64_sub_ri,
-    <u64 as IntOps>::sub
+    <Sub as BinOp<i64>>::bin_op
 );
 bin_op!(
     i64_mul_ss,
     i64_mul_rs,
     i64_mul_is,
     i64_mul_ir,
-    <u64 as IntOps>::mul
+    <Mul as BinOp<i64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_div_s_ss,
@@ -3397,7 +3397,7 @@ bin_op_noncommutative!(
     i64_div_s_sr,
     i64_div_s_si,
     i64_div_s_ri,
-    <i64 as IntOps>::div
+    <Div as BinOp<i64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_div_u_ss,
@@ -3407,7 +3407,7 @@ bin_op_noncommutative!(
     i64_div_u_sr,
     i64_div_u_si,
     i64_div_u_ri,
-    <u64 as IntOps>::div
+    <Div as BinOp<u64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_rem_s_ss,
@@ -3417,7 +3417,7 @@ bin_op_noncommutative!(
     i64_rem_s_sr,
     i64_rem_s_si,
     i64_rem_s_ri,
-    <i64 as IntOps>::rem
+    <Rem as BinOp<i64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_rem_u_ss,
@@ -3427,28 +3427,28 @@ bin_op_noncommutative!(
     i64_rem_u_sr,
     i64_rem_u_si,
     i64_rem_u_ri,
-    <u64 as IntOps>::rem
+    <Rem as BinOp<u64>>::bin_op
 );
 bin_op!(
     i64_and_ss,
     i64_and_rs,
     i64_and_is,
     i64_and_ir,
-    <u64 as IntOps>::and
+    <And as BinOp<i64>>::bin_op
 );
 bin_op!(
     i64_or_ss,
     i64_or_rs,
     i64_or_is,
     i64_or_ir,
-    <u64 as IntOps>::or
+    <Or as BinOp<i64>>::bin_op
 );
 bin_op!(
     i64_xor_ss,
     i64_xor_rs,
     i64_xor_is,
     i64_xor_ir,
-    <u64 as IntOps>::xor
+    <Xor as BinOp<i64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_shl_ss,
@@ -3458,7 +3458,7 @@ bin_op_noncommutative!(
     i64_shl_sr,
     i64_shl_si,
     i64_shl_ri,
-    <u64 as IntOps>::shl
+    <Shl as BinOp<i64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_shr_s_ss,
@@ -3468,7 +3468,7 @@ bin_op_noncommutative!(
     i64_shr_s_sr,
     i64_shr_s_si,
     i64_shr_s_ri,
-    <i64 as IntOps>::shr
+    <Shr as BinOp<i64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_shr_u_ss,
@@ -3478,7 +3478,7 @@ bin_op_noncommutative!(
     i64_shr_u_sr,
     i64_shr_u_si,
     i64_shr_u_ri,
-    <u64 as IntOps>::shr
+    <Shr as BinOp<u64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_rotl_ss,
@@ -3488,7 +3488,7 @@ bin_op_noncommutative!(
     i64_rotl_sr,
     i64_rotl_si,
     i64_rotl_ri,
-    <u64 as IntOps>::rotl
+    <Rotl as BinOp<i64>>::bin_op
 );
 bin_op_noncommutative!(
     i64_rotr_ss,
@@ -3498,22 +3498,22 @@ bin_op_noncommutative!(
     i64_rotr_sr,
     i64_rotr_si,
     i64_rotr_ri,
-    <u64 as IntOps>::rotr
+    <Rotr as BinOp<i64>>::bin_op
 );
 
-un_op!(f32_abs_s, f32_abs_r, <f32 as FloatOps>::abs);
-un_op!(f32_neg_s, f32_neg_r, <f32 as FloatOps>::neg);
-un_op!(f32_ceil_s, f32_ceil_r, <f32 as FloatOps>::ceil);
-un_op!(f32_floor_s, f32_floor_r, <f32 as FloatOps>::floor);
-un_op!(f32_trunc_s, f32_trunc_r, <f32 as FloatOps>::trunc);
-un_op!(f32_nearest_s, f32_nearest_r, <f32 as FloatOps>::nearest);
-un_op!(f32_sqrt_s, f32_sqrt_r, <f32 as FloatOps>::sqrt);
+un_op!(f32_abs_s, f32_abs_r, <Abs as UnOp<f32>>::un_op);
+un_op!(f32_neg_s, f32_neg_r, <Neg as UnOp<f32>>::un_op);
+un_op!(f32_ceil_s, f32_ceil_r, <Ceil as UnOp<f32>>::un_op);
+un_op!(f32_floor_s, f32_floor_r, <Floor as UnOp<f32>>::un_op);
+un_op!(f32_trunc_s, f32_trunc_r, <Trunc as UnOp<f32>>::un_op);
+un_op!(f32_nearest_s, f32_nearest_r, <Nearest as UnOp<f32>>::un_op);
+un_op!(f32_sqrt_s, f32_sqrt_r, <Sqrt as UnOp<f32>>::un_op);
 bin_op!(
     f32_add_ss,
     f32_add_rs,
     f32_add_is,
     f32_add_ir,
-    <f32 as FloatOps>::add
+    <Add as BinOp<f32>>::bin_op
 );
 bin_op_noncommutative!(
     f32_sub_ss,
@@ -3523,14 +3523,14 @@ bin_op_noncommutative!(
     f32_sub_sr,
     f32_sub_si,
     f32_sub_ri,
-    <f32 as FloatOps>::sub
+    <Sub as BinOp<f32>>::bin_op
 );
 bin_op!(
     f32_mul_ss,
     f32_mul_rs,
     f32_mul_is,
     f32_mul_ir,
-    <f32 as FloatOps>::mul
+    <Mul as BinOp<f32>>::bin_op
 );
 bin_op_noncommutative!(
     f32_div_ss,
@@ -3540,21 +3540,21 @@ bin_op_noncommutative!(
     f32_div_sr,
     f32_div_si,
     f32_div_ri,
-    <f32 as FloatOps>::div
+    <Div as BinOp<f32>>::bin_op
 );
 bin_op!(
     f32_min_ss,
     f32_min_rs,
     f32_min_is,
     f32_min_ir,
-    <f32 as FloatOps>::min
+    <Min as BinOp<f32>>::bin_op
 );
 bin_op!(
     f32_max_ss,
     f32_max_rs,
     f32_max_is,
     f32_max_ir,
-    <f32 as FloatOps>::max
+    <Max as BinOp<f32>>::bin_op
 );
 bin_op_noncommutative!(
     f32_copysign_ss,
@@ -3564,22 +3564,22 @@ bin_op_noncommutative!(
     f32_copysign_sr,
     f32_copysign_si,
     f32_copysign_ri,
-    <f32 as FloatOps>::copysign
+    <Copysign as BinOp<f32>>::bin_op
 );
 
-un_op!(f64_abs_s, f64_abs_r, <f64 as FloatOps>::abs);
-un_op!(f64_neg_s, f64_neg_r, <f64 as FloatOps>::neg);
-un_op!(f64_ceil_s, f64_ceil_r, <f64 as FloatOps>::ceil);
-un_op!(f64_floor_s, f64_floor_r, <f64 as FloatOps>::floor);
-un_op!(f64_trunc_s, f64_trunc_r, <f64 as FloatOps>::trunc);
-un_op!(f64_nearest_s, f64_nearest_r, <f64 as FloatOps>::nearest);
-un_op!(f64_sqrt_s, f64_sqrt_r, <f64 as FloatOps>::sqrt);
+un_op!(f64_abs_s, f64_abs_r, <Abs as UnOp<f64>>::un_op);
+un_op!(f64_neg_s, f64_neg_r, <Neg as UnOp<f64>>::un_op);
+un_op!(f64_ceil_s, f64_ceil_r, <Ceil as UnOp<f64>>::un_op);
+un_op!(f64_floor_s, f64_floor_r, <Floor as UnOp<f64>>::un_op);
+un_op!(f64_trunc_s, f64_trunc_r, <Trunc as UnOp<f64>>::un_op);
+un_op!(f64_nearest_s, f64_nearest_r, <Nearest as UnOp<f64>>::un_op);
+un_op!(f64_sqrt_s, f64_sqrt_r, <Sqrt as UnOp<f64>>::un_op);
 bin_op!(
     f64_add_ss,
     f64_add_rs,
     f64_add_is,
     f64_add_ir,
-    <f64 as FloatOps>::add
+    <Add as BinOp<f64>>::bin_op
 );
 bin_op_noncommutative!(
     f64_sub_ss,
@@ -3589,14 +3589,14 @@ bin_op_noncommutative!(
     f64_sub_sr,
     f64_sub_si,
     f64_sub_ri,
-    <f64 as FloatOps>::sub
+    <Sub as BinOp<f64>>::bin_op
 );
 bin_op!(
     f64_mul_ss,
     f64_mul_rs,
     f64_mul_is,
     f64_mul_ir,
-    <f64 as FloatOps>::mul
+    <Mul as BinOp<f64>>::bin_op
 );
 bin_op_noncommutative!(
     f64_div_ss,
@@ -3606,21 +3606,21 @@ bin_op_noncommutative!(
     f64_div_sr,
     f64_div_si,
     f64_div_ri,
-    <f64 as FloatOps>::div
+    <Div as BinOp<f64>>::bin_op
 );
 bin_op!(
     f64_min_ss,
     f64_min_rs,
     f64_min_is,
     f64_min_ir,
-    <f64 as FloatOps>::min
+    <Min as BinOp<f64>>::bin_op
 );
 bin_op!(
     f64_max_ss,
     f64_max_rs,
     f64_max_is,
     f64_max_ir,
-    <f64 as FloatOps>::max
+    <Max as BinOp<f64>>::bin_op
 );
 bin_op_noncommutative!(
     f64_copysign_ss,
@@ -3630,196 +3630,196 @@ bin_op_noncommutative!(
     f64_copysign_sr,
     f64_copysign_si,
     f64_copysign_ri,
-    <f64 as FloatOps>::copysign
+    <Copysign as BinOp<f64>>::bin_op
 );
 
-un_op!(i32_wrap_i64_s, i32_wrap_i64_r, <u32 as Wrap<u64>>::wrap);
+un_op!(i32_wrap_i64_s, i32_wrap_i64_r, <WrapTo<i32> as UnOp<i64>>::un_op);
 un_op!(
     i32_trunc_f32_s_s,
     i32_trunc_f32_s_r,
-    <i32 as Trunc<f32>>::trunc
+    <TruncTo<i32> as UnOp<f32>>::un_op
 );
 un_op!(
     i32_trunc_f32_u_s,
     i32_trunc_f32_u_r,
-    <u32 as Trunc<f32>>::trunc
+    <TruncTo<u32> as UnOp<f32>>::un_op
 );
 un_op!(
     i32_trunc_f64_s_s,
     i32_trunc_f64_s_r,
-    <i32 as Trunc<f64>>::trunc
+    <TruncTo<i32> as UnOp<f64>>::un_op
 );
 un_op!(
     i32_trunc_f64_u_s,
     i32_trunc_f64_u_r,
-    <u32 as Trunc<f64>>::trunc
+    <TruncTo<u32> as UnOp<f64>>::un_op
 );
 un_op!(
     i64_extend_i32_s_s,
     i64_extend_i32_s_r,
-    <i64 as Extend<i32>>::extend
+    <ExtendTo<i64> as UnOp<i32>>::un_op
 );
 un_op!(
     i64_extend_i32_u_s,
     i64_extend_i32_u_r,
-    <u64 as Extend<u32>>::extend
+    <ExtendTo<u64> as UnOp<u32>>::un_op
 );
 un_op!(
     i64_trunc_f32_s_s,
     i64_trunc_f32_s_r,
-    <i64 as Trunc<f32>>::trunc
+    <TruncTo<i64> as UnOp<f32>>::un_op
 );
 un_op!(
     i64_trunc_f32_u_s,
     i64_trunc_f32_u_r,
-    <u64 as Trunc<f32>>::trunc
+    <TruncTo<u64> as UnOp<f32>>::un_op
 );
 un_op!(
     i64_trunc_f64_s_s,
     i64_trunc_f64_s_r,
-    <i64 as Trunc<f64>>::trunc
+    <TruncTo<i64> as UnOp<f64>>::un_op
 );
 un_op!(
     i64_trunc_f64_u_s,
     i64_trunc_f64_u_r,
-    <u64 as Trunc<f64>>::trunc
+    <TruncTo<u64> as UnOp<f64>>::un_op
 );
 un_op!(
     f32_convert_i32_s_s,
     f32_convert_i32_s_r,
-    <f32 as Convert<i32>>::convert
+    <ConvertTo<f32> as UnOp<i32>>::un_op
 );
 un_op!(
     f32_convert_i32_u_s,
     f32_convert_i32_u_r,
-    <f32 as Convert<u32>>::convert
+    <ConvertTo<f32> as UnOp<u32>>::un_op
 );
 un_op!(
     f32_convert_i64_s_s,
     f32_convert_i64_s_r,
-    <f32 as Convert<i64>>::convert
+    <ConvertTo<f32> as UnOp<i64>>::un_op
 );
 un_op!(
     f32_convert_i64_u_s,
     f32_convert_i64_u_r,
-    <f32 as Convert<u64>>::convert
+    <ConvertTo<f32> as UnOp<u64>>::un_op
 );
 un_op!(
     f32_demote_f64_s,
     f32_demote_f64_r,
-    <f32 as Demote<f64>>::demote
+    <DemoteTo<f32> as UnOp<f64>>::un_op
 );
 un_op!(
     f64_convert_i32_s_s,
     f64_convert_i32_s_r,
-    <f64 as Convert<i32>>::convert
+    <ConvertTo<f64> as UnOp<i32>>::un_op
 );
 un_op!(
     f64_convert_i32_u_s,
     f64_convert_i32_u_r,
-    <f64 as Convert<u32>>::convert
+    <ConvertTo<f64> as UnOp<u32>>::un_op
 );
 un_op!(
     f64_convert_i64_s_s,
     f64_convert_i64_s_r,
-    <f64 as Convert<i64>>::convert
+    <ConvertTo<f64> as UnOp<i64>>::un_op
 );
 un_op!(
     f64_convert_i64_u_s,
     f64_convert_i64_u_r,
-    <f64 as Convert<u64>>::convert
+    <ConvertTo<f64> as UnOp<u64>>::un_op
 );
 un_op!(
     f64_promote_f32_s,
     f64_promote_f32_r,
-    <f64 as Promote<f32>>::promote
+    <PromoteTo<f64> as UnOp<f32>>::un_op
 );
 un_op!(
     i32_reinterpret_f32_s,
     i32_reinterpret_f32_r,
-    <u32 as Reinterpret<f32>>::reinterpret
+    <ReinterpretTo<i32> as UnOp<f32>>::un_op
 );
 un_op!(
     i64_reinterpret_f64_s,
     i64_reinterpret_f64_r,
-    <u64 as Reinterpret<f64>>::reinterpret
+    <ReinterpretTo<i64> as UnOp<f64>>::un_op
 );
 un_op!(
     f32_reinterpret_i32_s,
     f32_reinterpret_i32_r,
-    <f32 as Reinterpret<u32>>::reinterpret
+    <ReinterpretTo<f32> as UnOp<i32>>::un_op
 );
 un_op!(
     f64_reinterpret_i64_s,
     f64_reinterpret_i64_r,
-    <f64 as Reinterpret<u64>>::reinterpret
+    <ReinterpretTo<f64> as UnOp<i64>>::un_op
 );
 
 un_op!(
     i32_extend8_s_s,
     i32_extend8_s_r,
-    <i32 as ExtendN<i8>>::extend_n
+    <ExtendFrom<i8> as UnOp<i32>>::un_op
 );
 un_op!(
     i32_extend16_s_s,
     i32_extend16_s_r,
-    <i32 as ExtendN<i16>>::extend_n
+    <ExtendFrom<i16> as UnOp<i32>>::un_op
 );
 un_op!(
     i64_extend8_s_s,
     i64_extend8_s_r,
-    <i64 as ExtendN<i8>>::extend_n
+    <ExtendFrom<i8> as UnOp<i64>>::un_op
 );
 un_op!(
     i64_extend16_s_s,
     i64_extend16_s_r,
-    <i64 as ExtendN<i16>>::extend_n
+    <ExtendFrom<i16> as UnOp<i64>>::un_op
 );
 un_op!(
     i64_extend32_s_s,
     i64_extend32_s_r,
-    <i64 as ExtendN<i32>>::extend_n
+    <ExtendFrom<i32> as UnOp<i64>>::un_op
 );
 
 un_op!(
     i32_trunc_sat_f32_s_s,
     i32_trunc_sat_f32_s_r,
-    <i32 as Trunc<f32>>::trunc_sat
+    <TruncSatTo<i32> as UnOp<f32>>::un_op
 );
 un_op!(
     i32_trunc_sat_f32_u_s,
     i32_trunc_sat_f32_u_r,
-    <u32 as Trunc<f32>>::trunc_sat
+    <TruncSatTo<u32> as UnOp<f32>>::un_op
 );
 un_op!(
     i32_trunc_sat_f64_s_s,
     i32_trunc_sat_f64_s_r,
-    <i32 as Trunc<f64>>::trunc_sat
+    <TruncSatTo<i32> as UnOp<f64>>::un_op
 );
 un_op!(
     i32_trunc_sat_f64_u_s,
     i32_trunc_sat_f64_u_r,
-    <u32 as Trunc<f64>>::trunc_sat
+    <TruncSatTo<u32> as UnOp<f64>>::un_op
 );
 un_op!(
     i64_trunc_sat_f32_s_s,
     i64_trunc_sat_f32_s_r,
-    <i64 as Trunc<f32>>::trunc_sat
+    <TruncSatTo<i64> as UnOp<f32>>::un_op
 );
 un_op!(
     i64_trunc_sat_f32_u_s,
     i64_trunc_sat_f32_u_r,
-    <u64 as Trunc<f32>>::trunc_sat
+    <TruncSatTo<u64> as UnOp<f32>>::un_op
 );
 un_op!(
     i64_trunc_sat_f64_s_s,
     i64_trunc_sat_f64_s_r,
-    <i64 as Trunc<f64>>::trunc_sat
+    <TruncSatTo<i64> as UnOp<f64>>::un_op
 );
 un_op!(
     i64_trunc_sat_f64_u_s,
     i64_trunc_sat_f64_u_r,
-    <u64 as Trunc<f64>>::trunc_sat
+    <TruncSatTo<u64> as UnOp<f64>>::un_op
 );
 
 // Miscellaneous instructions
