@@ -2074,28 +2074,10 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit(select_bin_op(info, self.opd(1).kind(), self.opd(0).kind()));
 
         // Emit the inputs and pop them from the stack.
-        //
-        // Commutative binary operations do not have an _sr, _si, or _ri variant. Since the order
-        // of the operands does not matter for these operations, we can implement these variants
-        // by swapping the operands, and forwarding to the _rs, _is, or _ir variant, respectively
-        // (which are always available).
-        //
-        // We only need to swap the order in which the operands are emitted for the _si variant,
-        // since we never emit anything for register operands.
-        match (self.opd(1).kind(), self.opd(0).kind()) {
-            (OpdKind::Stack, OpdKind::Imm) if info.instr_is == info.instr_si => {
-                self.emit_opd(1);
-                self.emit_opd(0);
-                self.pop_opd();
-                self.pop_opd();
-            }
-            _ => {
-                self.emit_opd(0);
-                self.pop_opd();
-                self.emit_opd(0);
-                self.pop_opd();
-            }
-        }
+        self.emit_opd(0);
+        self.pop_opd();
+        self.emit_opd(0);
+        self.pop_opd();
 
         // If the operation has an output, push the output onto the stack and allocate a register
         // for it.
