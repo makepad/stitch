@@ -8,10 +8,10 @@ use {
         },
         decode::DecodeError,
         exec,
-        exec::ThreadedInstr,
-        extern_ref::ExternRef,
+        exec::{Imm, ReadReg, Reg, Stk, ThreadedInstr, WriteReg},
+        extern_ref::{ExternRef, UnguardedExternRef},
         func::{Func, FuncEntity, FuncType},
-        func_ref::FuncRef,
+        func_ref::{FuncRef, UnguardedFuncRef},
         instance::Instance,
         ref_::RefType,
         stack::StackSlot,
@@ -480,7 +480,7 @@ impl<'a> Compile<'a> {
     // emits the value of the operand. For register operands, we don't need to anything.
     fn emit_opd(&mut self, opd_depth: usize) {
         match self.opd(opd_depth).kind() {
-            OpdKind::Stack => self.emit_stack_offset(self.opd_stack_idx(opd_depth)),
+            OpdKind::Stk => self.emit_stack_offset(self.opd_stack_idx(opd_depth)),
             OpdKind::Imm => {
                 self.emit_val(self.opd(opd_depth).val.unwrap());
             }
@@ -2245,7 +2245,7 @@ impl Opd {
         } else if self.is_reg {
             OpdKind::Reg
         } else {
-            OpdKind::Stack
+            OpdKind::Stk
         }
     }
 }
@@ -2260,7 +2260,7 @@ impl Opd {
 /// stack.
 #[derive(Clone, Copy, Debug)]
 enum OpdKind {
-    Stack,
+    Stk,
     Reg,
     Imm,
 }
@@ -2274,7 +2274,7 @@ enum OpdKind {
 
 fn select_br_if_z(kind: OpdKind) -> ThreadedInstr {
     match kind {
-        OpdKind::Stack => exec::br_if_z_s,
+        OpdKind::Stk => exec::br_if_z_s,
         OpdKind::Reg => exec::br_if_z_r,
         OpdKind::Imm => panic!("no suitable instruction found"),
     }
@@ -2282,7 +2282,7 @@ fn select_br_if_z(kind: OpdKind) -> ThreadedInstr {
 
 fn select_br_if_nz(kind: OpdKind) -> ThreadedInstr {
     match kind {
-        OpdKind::Stack => exec::br_if_nz_s,
+        OpdKind::Stk => exec::br_if_nz_s,
         OpdKind::Reg => exec::br_if_nz_r,
         OpdKind::Imm => panic!("no suitable instruction found"),
     }
@@ -2290,7 +2290,7 @@ fn select_br_if_nz(kind: OpdKind) -> ThreadedInstr {
 
 fn select_br_table(kind: OpdKind) -> ThreadedInstr {
     match kind {
-        OpdKind::Stack => exec::br_table_s,
+        OpdKind::Stk => exec::br_table_s,
         OpdKind::Reg => exec::br_table_r,
         OpdKind::Imm => panic!("no suitable instruction found"),
     }
@@ -2305,165 +2305,59 @@ fn select_ref_null(type_: RefType) -> ThreadedInstr {
 
 fn select_ref_is_null(type_: RefType, kind: OpdKind) -> ThreadedInstr {
     match (type_, kind) {
-        (RefType::FuncRef, OpdKind::Stack) => exec::ref_is_null_func_ref_s,
+        (RefType::FuncRef, OpdKind::Stk) => exec::ref_is_null_func_ref_s,
         (RefType::FuncRef, OpdKind::Reg) => exec::ref_is_null_func_ref_r,
 
-        (RefType::ExternRef, OpdKind::Stack) => exec::ref_is_null_extern_ref_s,
+        (RefType::ExternRef, OpdKind::Stk) => exec::ref_is_null_extern_ref_s,
         (RefType::ExternRef, OpdKind::Reg) => exec::ref_is_null_extern_ref_r,
 
         (_, OpdKind::Imm) => panic!("no suitable instruction found"),
     }
 }
 
-fn select_select(
-    type_: ValType,
-    kind_0: OpdKind,
-    kind_1: OpdKind,
-    kind_2: OpdKind,
-) -> ThreadedInstr {
-    match (type_, kind_0, kind_1, kind_2) {
-        (ValType::I32, OpdKind::Stack, OpdKind::Stack, OpdKind::Stack) => exec::select_i32_sss,
-        (ValType::I32, OpdKind::Reg, OpdKind::Stack, OpdKind::Stack) => exec::select_i32_rss,
-        (ValType::I32, OpdKind::Imm, OpdKind::Stack, OpdKind::Stack) => exec::select_i32_iss,
-        (ValType::I32, OpdKind::Stack, OpdKind::Reg, OpdKind::Stack) => exec::select_i32_srs,
-        (ValType::I32, OpdKind::Imm, OpdKind::Reg, OpdKind::Stack) => exec::select_i32_irs,
-        (ValType::I32, OpdKind::Stack, OpdKind::Imm, OpdKind::Stack) => exec::select_i32_sis,
-        (ValType::I32, OpdKind::Reg, OpdKind::Imm, OpdKind::Stack) => exec::select_i32_ris,
-        (ValType::I32, OpdKind::Imm, OpdKind::Imm, OpdKind::Stack) => exec::select_i32_iis,
-        (ValType::I32, OpdKind::Stack, OpdKind::Stack, OpdKind::Reg) => exec::select_i32_ssr,
-        (ValType::I32, OpdKind::Imm, OpdKind::Stack, OpdKind::Reg) => exec::select_i32_isr,
-        (ValType::I32, OpdKind::Stack, OpdKind::Imm, OpdKind::Reg) => exec::select_i32_sir,
-        (ValType::I32, OpdKind::Imm, OpdKind::Imm, OpdKind::Reg) => exec::select_i32_iir,
+fn select_select(type_: ValType, input_0: OpdKind, input_1: OpdKind, input_2: OpdKind) -> ThreadedInstr {
+    match type_ {
+        ValType::I32 => select_select_inner::<i32>(input_0, input_1, input_2),
+        ValType::I64 => select_select_inner::<i64>(input_0, input_1, input_2),
+        ValType::F32 => select_select_inner::<f32>(input_0, input_1, input_2),
+        ValType::F64 => select_select_inner::<f64>(input_0, input_1, input_2),
+        ValType::FuncRef => select_select_inner::<UnguardedFuncRef>(input_0, input_1, input_2),
+        ValType::ExternRef => select_select_inner::<UnguardedExternRef>(input_0, input_1, input_2),
+    }
+}
 
-        (ValType::I64, OpdKind::Stack, OpdKind::Stack, OpdKind::Stack) => exec::select_i64_sss,
-        (ValType::I64, OpdKind::Reg, OpdKind::Stack, OpdKind::Stack) => exec::select_i64_rss,
-        (ValType::I64, OpdKind::Imm, OpdKind::Stack, OpdKind::Stack) => exec::select_i64_iss,
-        (ValType::I64, OpdKind::Stack, OpdKind::Reg, OpdKind::Stack) => exec::select_i64_srs,
-        (ValType::I64, OpdKind::Imm, OpdKind::Reg, OpdKind::Stack) => exec::select_i64_irs,
-        (ValType::I64, OpdKind::Stack, OpdKind::Imm, OpdKind::Stack) => exec::select_i64_sis,
-        (ValType::I64, OpdKind::Reg, OpdKind::Imm, OpdKind::Stack) => exec::select_i64_ris,
-        (ValType::I64, OpdKind::Imm, OpdKind::Imm, OpdKind::Stack) => exec::select_i64_iis,
-        (ValType::I64, OpdKind::Stack, OpdKind::Stack, OpdKind::Reg) => exec::select_i64_ssr,
-        (ValType::I64, OpdKind::Imm, OpdKind::Stack, OpdKind::Reg) => exec::select_i64_isr,
-        (ValType::I64, OpdKind::Stack, OpdKind::Imm, OpdKind::Reg) => exec::select_i64_sir,
-        (ValType::I64, OpdKind::Imm, OpdKind::Imm, OpdKind::Reg) => exec::select_i64_iir,
-
-        (ValType::F32, OpdKind::Stack, OpdKind::Stack, OpdKind::Stack) => exec::select_f32_sss,
-        (ValType::F32, OpdKind::Reg, OpdKind::Stack, OpdKind::Stack) => exec::select_f32_rss,
-        (ValType::F32, OpdKind::Imm, OpdKind::Stack, OpdKind::Stack) => exec::select_f32_iss,
-        (ValType::F32, OpdKind::Stack, OpdKind::Reg, OpdKind::Stack) => exec::select_f32_srs,
-        (ValType::F32, OpdKind::Imm, OpdKind::Reg, OpdKind::Stack) => exec::select_f32_irs,
-        (ValType::F32, OpdKind::Stack, OpdKind::Imm, OpdKind::Stack) => exec::select_f32_sis,
-        (ValType::F32, OpdKind::Reg, OpdKind::Imm, OpdKind::Stack) => exec::select_f32_ris,
-        (ValType::F32, OpdKind::Imm, OpdKind::Imm, OpdKind::Stack) => exec::select_f32_iis,
-        (ValType::F32, OpdKind::Stack, OpdKind::Stack, OpdKind::Reg) => exec::select_f32_ssr,
-        (ValType::F32, OpdKind::Imm, OpdKind::Stack, OpdKind::Reg) => exec::select_f32_isr,
-        (ValType::F32, OpdKind::Stack, OpdKind::Imm, OpdKind::Reg) => exec::select_f32_sir,
-        (ValType::F32, OpdKind::Imm, OpdKind::Imm, OpdKind::Reg) => exec::select_f32_iir,
-        (ValType::F32, OpdKind::Reg, OpdKind::Stack, OpdKind::Reg) => exec::select_f32_rsr,
-        (ValType::F32, OpdKind::Stack, OpdKind::Reg, OpdKind::Reg) => exec::select_f32_srr,
-        (ValType::F32, OpdKind::Imm, OpdKind::Reg, OpdKind::Reg) => exec::select_f32_irr,
-        (ValType::F32, OpdKind::Reg, OpdKind::Imm, OpdKind::Reg) => exec::select_f32_rir,
-
-        (ValType::F64, OpdKind::Stack, OpdKind::Stack, OpdKind::Stack) => exec::select_f64_sss,
-        (ValType::F64, OpdKind::Reg, OpdKind::Stack, OpdKind::Stack) => exec::select_f64_rss,
-        (ValType::F64, OpdKind::Imm, OpdKind::Stack, OpdKind::Stack) => exec::select_f64_iss,
-        (ValType::F64, OpdKind::Stack, OpdKind::Reg, OpdKind::Stack) => exec::select_f64_srs,
-        (ValType::F64, OpdKind::Imm, OpdKind::Reg, OpdKind::Stack) => exec::select_f64_irs,
-        (ValType::F64, OpdKind::Stack, OpdKind::Imm, OpdKind::Stack) => exec::select_f64_sis,
-        (ValType::F64, OpdKind::Reg, OpdKind::Imm, OpdKind::Stack) => exec::select_f64_ris,
-        (ValType::F64, OpdKind::Imm, OpdKind::Imm, OpdKind::Stack) => exec::select_f64_iis,
-        (ValType::F64, OpdKind::Stack, OpdKind::Stack, OpdKind::Reg) => exec::select_f64_ssr,
-        (ValType::F64, OpdKind::Imm, OpdKind::Stack, OpdKind::Reg) => exec::select_f64_isr,
-        (ValType::F64, OpdKind::Stack, OpdKind::Imm, OpdKind::Reg) => exec::select_f64_sir,
-        (ValType::F64, OpdKind::Imm, OpdKind::Imm, OpdKind::Reg) => exec::select_f64_iir,
-        (ValType::F64, OpdKind::Reg, OpdKind::Stack, OpdKind::Reg) => exec::select_f64_rsr,
-        (ValType::F64, OpdKind::Stack, OpdKind::Reg, OpdKind::Reg) => exec::select_f64_srr,
-        (ValType::F64, OpdKind::Imm, OpdKind::Reg, OpdKind::Reg) => exec::select_f64_irr,
-        (ValType::F64, OpdKind::Reg, OpdKind::Imm, OpdKind::Reg) => exec::select_f64_rir,
-
-        (ValType::FuncRef, OpdKind::Stack, OpdKind::Stack, OpdKind::Stack) => {
-            exec::select_func_ref_sss
-        }
-        (ValType::FuncRef, OpdKind::Reg, OpdKind::Stack, OpdKind::Stack) => {
-            exec::select_func_ref_rss
-        }
-        (ValType::FuncRef, OpdKind::Imm, OpdKind::Stack, OpdKind::Stack) => {
-            exec::select_func_ref_iss
-        }
-        (ValType::FuncRef, OpdKind::Stack, OpdKind::Reg, OpdKind::Stack) => {
-            exec::select_func_ref_srs
-        }
-        (ValType::FuncRef, OpdKind::Imm, OpdKind::Reg, OpdKind::Stack) => exec::select_func_ref_irs,
-        (ValType::FuncRef, OpdKind::Stack, OpdKind::Imm, OpdKind::Stack) => {
-            exec::select_func_ref_sis
-        }
-        (ValType::FuncRef, OpdKind::Reg, OpdKind::Imm, OpdKind::Stack) => exec::select_func_ref_ris,
-        (ValType::FuncRef, OpdKind::Imm, OpdKind::Imm, OpdKind::Stack) => exec::select_func_ref_iis,
-        (ValType::FuncRef, OpdKind::Stack, OpdKind::Stack, OpdKind::Reg) => {
-            exec::select_func_ref_ssr
-        }
-        (ValType::FuncRef, OpdKind::Imm, OpdKind::Stack, OpdKind::Reg) => exec::select_func_ref_isr,
-        (ValType::FuncRef, OpdKind::Stack, OpdKind::Imm, OpdKind::Reg) => exec::select_func_ref_sir,
-        (ValType::FuncRef, OpdKind::Imm, OpdKind::Imm, OpdKind::Reg) => exec::select_func_ref_iir,
-
-        (ValType::ExternRef, OpdKind::Stack, OpdKind::Stack, OpdKind::Stack) => {
-            exec::select_extern_ref_sss
-        }
-        (ValType::ExternRef, OpdKind::Reg, OpdKind::Stack, OpdKind::Stack) => {
-            exec::select_extern_ref_rss
-        }
-        (ValType::ExternRef, OpdKind::Imm, OpdKind::Stack, OpdKind::Stack) => {
-            exec::select_extern_ref_iss
-        }
-        (ValType::ExternRef, OpdKind::Stack, OpdKind::Reg, OpdKind::Stack) => {
-            exec::select_extern_ref_srs
-        }
-        (ValType::ExternRef, OpdKind::Imm, OpdKind::Reg, OpdKind::Stack) => {
-            exec::select_extern_ref_irs
-        }
-        (ValType::ExternRef, OpdKind::Stack, OpdKind::Imm, OpdKind::Stack) => {
-            exec::select_extern_ref_sis
-        }
-        (ValType::ExternRef, OpdKind::Reg, OpdKind::Imm, OpdKind::Stack) => {
-            exec::select_extern_ref_ris
-        }
-        (ValType::ExternRef, OpdKind::Imm, OpdKind::Imm, OpdKind::Stack) => {
-            exec::select_extern_ref_iis
-        }
-        (ValType::ExternRef, OpdKind::Stack, OpdKind::Stack, OpdKind::Reg) => {
-            exec::select_extern_ref_ssr
-        }
-        (ValType::ExternRef, OpdKind::Imm, OpdKind::Stack, OpdKind::Reg) => {
-            exec::select_extern_ref_isr
-        }
-        (ValType::ExternRef, OpdKind::Stack, OpdKind::Imm, OpdKind::Reg) => {
-            exec::select_extern_ref_sir
-        }
-        (ValType::ExternRef, OpdKind::Imm, OpdKind::Imm, OpdKind::Reg) => {
-            exec::select_extern_ref_iir
-        }
-
-        // The first operand is an integer or a reference, and the third operand is an integer,
-        // both of which are stored in a register. Since we only have one integer register
-        // available, there is no variant of this instruction that can handle this case.
-        (
-            ValType::I32 | ValType::I64 | ValType::FuncRef | ValType::ExternRef,
-            OpdKind::Reg,
-            _,
-            OpdKind::Reg,
-        )
-        | (
-            ValType::I32 | ValType::I64 | ValType::FuncRef | ValType::ExternRef,
-            _,
-            OpdKind::Reg,
-            OpdKind::Reg,
-        )
-        // The first and the second operand have the same type, which means they are stored in the
-        // same register. Since we only have one register available for every type, there is no
-        // variant of this instruction that can handle this case.
-        | (_, OpdKind::Reg, OpdKind::Reg, _)
-        | (_, _, _, OpdKind::Imm) => panic!("no suitable instruction found"),
+fn select_select_inner<T>(input_0: OpdKind, input_1: OpdKind, input_2: OpdKind) -> ThreadedInstr
+where
+    T: ReadReg + WriteReg
+{
+    match (input_0, input_1, input_2) {
+        (OpdKind::Imm, OpdKind::Imm, OpdKind::Imm) => exec::select::<T, Imm, Imm, Imm, Reg>,
+        (OpdKind::Stk, OpdKind::Imm, OpdKind::Imm) => exec::select::<T, Stk, Imm, Imm, Reg>,
+        (OpdKind::Reg, OpdKind::Imm, OpdKind::Imm) => exec::select::<T, Reg, Imm, Imm, Reg>,
+        (OpdKind::Imm, OpdKind::Stk, OpdKind::Imm) => exec::select::<T, Imm, Stk, Imm, Reg>,
+        (OpdKind::Stk, OpdKind::Stk, OpdKind::Imm) => exec::select::<T, Stk, Stk, Imm, Reg>,
+        (OpdKind::Reg, OpdKind::Stk, OpdKind::Imm) => exec::select::<T, Reg, Stk, Imm, Reg>,
+        (OpdKind::Imm, OpdKind::Reg, OpdKind::Imm) => exec::select::<T, Imm, Reg, Imm, Reg>,
+        (OpdKind::Stk, OpdKind::Reg, OpdKind::Imm) => exec::select::<T, Stk, Reg, Imm, Reg>,
+        (OpdKind::Reg, OpdKind::Reg, OpdKind::Imm) => exec::select::<T, Reg, Reg, Imm, Reg>,
+        (OpdKind::Imm, OpdKind::Imm, OpdKind::Stk) => exec::select::<T, Imm, Imm, Stk, Reg>,
+        (OpdKind::Stk, OpdKind::Imm, OpdKind::Stk) => exec::select::<T, Stk, Imm, Stk, Reg>,
+        (OpdKind::Reg, OpdKind::Imm, OpdKind::Stk) => exec::select::<T, Reg, Imm, Stk, Reg>,
+        (OpdKind::Imm, OpdKind::Stk, OpdKind::Stk) => exec::select::<T, Imm, Stk, Stk, Reg>,
+        (OpdKind::Stk, OpdKind::Stk, OpdKind::Stk) => exec::select::<T, Stk, Stk, Stk, Reg>,
+        (OpdKind::Reg, OpdKind::Stk, OpdKind::Stk) => exec::select::<T, Reg, Stk, Stk, Reg>,
+        (OpdKind::Imm, OpdKind::Reg, OpdKind::Stk) => exec::select::<T, Imm, Reg, Stk, Reg>,
+        (OpdKind::Stk, OpdKind::Reg, OpdKind::Stk) => exec::select::<T, Stk, Reg, Stk, Reg>,
+        (OpdKind::Reg, OpdKind::Reg, OpdKind::Stk) => exec::select::<T, Reg, Reg, Stk, Reg>,
+        (OpdKind::Imm, OpdKind::Imm, OpdKind::Reg) => exec::select::<T, Imm, Imm, Reg, Reg>,
+        (OpdKind::Stk, OpdKind::Imm, OpdKind::Reg) => exec::select::<T, Stk, Imm, Reg, Reg>,
+        (OpdKind::Reg, OpdKind::Imm, OpdKind::Reg) => exec::select::<T, Reg, Imm, Reg, Reg>,
+        (OpdKind::Imm, OpdKind::Stk, OpdKind::Reg) => exec::select::<T, Imm, Stk, Reg, Reg>,
+        (OpdKind::Stk, OpdKind::Stk, OpdKind::Reg) => exec::select::<T, Stk, Stk, Reg, Reg>,
+        (OpdKind::Reg, OpdKind::Stk, OpdKind::Reg) => exec::select::<T, Reg, Stk, Reg, Reg>,
+        (OpdKind::Imm, OpdKind::Reg, OpdKind::Reg) => exec::select::<T, Imm, Reg, Reg, Reg>,
+        (OpdKind::Stk, OpdKind::Reg, OpdKind::Reg) => exec::select::<T, Stk, Reg, Reg, Reg>,
+        (OpdKind::Reg, OpdKind::Reg, OpdKind::Reg) => exec::select::<T, Reg, Reg, Reg, Reg>,
     }
 }
 
@@ -2480,22 +2374,22 @@ fn select_global_get(type_: ValType) -> ThreadedInstr {
 
 fn select_global_set(type_: ValType, kind: OpdKind) -> ThreadedInstr {
     match (type_, kind) {
-        (ValType::I32, OpdKind::Stack) => exec::global_set_i32_s,
+        (ValType::I32, OpdKind::Stk) => exec::global_set_i32_s,
         (ValType::I32, OpdKind::Reg) => exec::global_set_i32_r,
         (ValType::I32, OpdKind::Imm) => exec::global_set_i32_i,
-        (ValType::I64, OpdKind::Stack) => exec::global_set_i64_s,
+        (ValType::I64, OpdKind::Stk) => exec::global_set_i64_s,
         (ValType::I64, OpdKind::Reg) => exec::global_set_i64_r,
         (ValType::I64, OpdKind::Imm) => exec::global_set_i64_i,
-        (ValType::F32, OpdKind::Stack) => exec::global_set_f32_s,
+        (ValType::F32, OpdKind::Stk) => exec::global_set_f32_s,
         (ValType::F32, OpdKind::Reg) => exec::global_set_f32_r,
         (ValType::F32, OpdKind::Imm) => exec::global_set_f32_i,
-        (ValType::F64, OpdKind::Stack) => exec::global_set_f64_s,
+        (ValType::F64, OpdKind::Stk) => exec::global_set_f64_s,
         (ValType::F64, OpdKind::Reg) => exec::global_set_f64_r,
         (ValType::F64, OpdKind::Imm) => exec::global_set_f64_i,
-        (ValType::FuncRef, OpdKind::Stack) => exec::global_set_func_ref_s,
+        (ValType::FuncRef, OpdKind::Stk) => exec::global_set_func_ref_s,
         (ValType::FuncRef, OpdKind::Reg) => exec::global_set_func_ref_r,
         (ValType::FuncRef, OpdKind::Imm) => exec::global_set_func_ref_i,
-        (ValType::ExternRef, OpdKind::Stack) => exec::global_set_extern_ref_s,
+        (ValType::ExternRef, OpdKind::Stk) => exec::global_set_extern_ref_s,
         (ValType::ExternRef, OpdKind::Reg) => exec::global_set_extern_ref_r,
         (ValType::ExternRef, OpdKind::Imm) => exec::global_set_extern_ref_i,
     }
@@ -2503,11 +2397,11 @@ fn select_global_set(type_: ValType, kind: OpdKind) -> ThreadedInstr {
 
 fn select_table_get(type_: RefType, kind: OpdKind) -> ThreadedInstr {
     match (type_, kind) {
-        (RefType::FuncRef, OpdKind::Stack) => exec::table_get_func_ref_s,
+        (RefType::FuncRef, OpdKind::Stk) => exec::table_get_func_ref_s,
         (RefType::FuncRef, OpdKind::Reg) => exec::table_get_func_ref_r,
         (RefType::FuncRef, OpdKind::Imm) => exec::table_get_func_ref_i,
 
-        (RefType::ExternRef, OpdKind::Stack) => exec::table_get_extern_ref_s,
+        (RefType::ExternRef, OpdKind::Stk) => exec::table_get_extern_ref_s,
         (RefType::ExternRef, OpdKind::Reg) => exec::table_get_extern_ref_r,
         (RefType::ExternRef, OpdKind::Imm) => exec::table_get_extern_ref_i,
     }
@@ -2515,22 +2409,22 @@ fn select_table_get(type_: RefType, kind: OpdKind) -> ThreadedInstr {
 
 fn select_table_set(type_: RefType, kind_0: OpdKind, kind_1: OpdKind) -> ThreadedInstr {
     match (type_, kind_0, kind_1) {
-        (RefType::FuncRef, OpdKind::Stack, OpdKind::Stack) => exec::table_set_func_ref_ss,
-        (RefType::FuncRef, OpdKind::Reg, OpdKind::Stack) => exec::table_set_func_ref_rs,
-        (RefType::FuncRef, OpdKind::Imm, OpdKind::Stack) => exec::table_set_func_ref_is,
+        (RefType::FuncRef, OpdKind::Stk, OpdKind::Stk) => exec::table_set_func_ref_ss,
+        (RefType::FuncRef, OpdKind::Reg, OpdKind::Stk) => exec::table_set_func_ref_rs,
+        (RefType::FuncRef, OpdKind::Imm, OpdKind::Stk) => exec::table_set_func_ref_is,
         (RefType::FuncRef, OpdKind::Imm, OpdKind::Reg) => exec::table_set_func_ref_ir,
         (RefType::FuncRef, OpdKind::Imm, OpdKind::Imm) => exec::table_set_func_ref_ii,
-        (RefType::FuncRef, OpdKind::Stack, OpdKind::Reg) => exec::table_set_func_ref_sr,
-        (RefType::FuncRef, OpdKind::Stack, OpdKind::Imm) => exec::table_set_func_ref_si,
+        (RefType::FuncRef, OpdKind::Stk, OpdKind::Reg) => exec::table_set_func_ref_sr,
+        (RefType::FuncRef, OpdKind::Stk, OpdKind::Imm) => exec::table_set_func_ref_si,
         (RefType::FuncRef, OpdKind::Reg, OpdKind::Imm) => exec::table_set_func_ref_ri,
 
-        (RefType::ExternRef, OpdKind::Stack, OpdKind::Stack) => exec::table_set_extern_ref_ss,
-        (RefType::ExternRef, OpdKind::Reg, OpdKind::Stack) => exec::table_set_extern_ref_rs,
-        (RefType::ExternRef, OpdKind::Imm, OpdKind::Stack) => exec::table_set_extern_ref_is,
+        (RefType::ExternRef, OpdKind::Stk, OpdKind::Stk) => exec::table_set_extern_ref_ss,
+        (RefType::ExternRef, OpdKind::Reg, OpdKind::Stk) => exec::table_set_extern_ref_rs,
+        (RefType::ExternRef, OpdKind::Imm, OpdKind::Stk) => exec::table_set_extern_ref_is,
         (RefType::ExternRef, OpdKind::Imm, OpdKind::Reg) => exec::table_set_extern_ref_ir,
         (RefType::ExternRef, OpdKind::Imm, OpdKind::Imm) => exec::table_set_extern_ref_ii,
-        (RefType::ExternRef, OpdKind::Stack, OpdKind::Reg) => exec::table_set_extern_ref_sr,
-        (RefType::ExternRef, OpdKind::Stack, OpdKind::Imm) => exec::table_set_extern_ref_si,
+        (RefType::ExternRef, OpdKind::Stk, OpdKind::Reg) => exec::table_set_extern_ref_sr,
+        (RefType::ExternRef, OpdKind::Stk, OpdKind::Imm) => exec::table_set_extern_ref_si,
         (RefType::ExternRef, OpdKind::Reg, OpdKind::Imm) => exec::table_set_extern_ref_ri,
 
         // The first operand is an integer, and the second operand is a reference, both of which
@@ -2586,7 +2480,7 @@ fn select_elem_drop(type_: RefType) -> ThreadedInstr {
 
 fn select_un_op(info: UnOpInfo, kind: OpdKind) -> ThreadedInstr {
     match kind {
-        OpdKind::Stack => Some(info.instr_s),
+        OpdKind::Stk => Some(info.instr_s),
         OpdKind::Reg => Some(info.instr_r),
         OpdKind::Imm => info.instr_i,
     }
@@ -2595,13 +2489,13 @@ fn select_un_op(info: UnOpInfo, kind: OpdKind) -> ThreadedInstr {
 
 fn select_bin_op(info: BinOpInfo, kind_0: OpdKind, kind_1: OpdKind) -> ThreadedInstr {
     match (kind_0, kind_1) {
-        (OpdKind::Stack, OpdKind::Stack) => Some(info.instr_ss),
-        (OpdKind::Reg, OpdKind::Stack) => Some(info.instr_rs),
-        (OpdKind::Imm, OpdKind::Stack) => Some(info.instr_is),
-        (OpdKind::Stack, OpdKind::Reg) => Some(info.instr_sr),
+        (OpdKind::Stk, OpdKind::Stk) => Some(info.instr_ss),
+        (OpdKind::Reg, OpdKind::Stk) => Some(info.instr_rs),
+        (OpdKind::Imm, OpdKind::Stk) => Some(info.instr_is),
+        (OpdKind::Stk, OpdKind::Reg) => Some(info.instr_sr),
         (OpdKind::Reg, OpdKind::Reg) => info.instr_rr,
         (OpdKind::Imm, OpdKind::Reg) => Some(info.instr_ir),
-        (OpdKind::Stack, OpdKind::Imm) => Some(info.instr_si),
+        (OpdKind::Stk, OpdKind::Imm) => Some(info.instr_si),
         (OpdKind::Reg, OpdKind::Imm) => Some(info.instr_ri),
         (OpdKind::Imm, OpdKind::Imm) => info.instr_ii,
     }
@@ -2610,7 +2504,7 @@ fn select_bin_op(info: BinOpInfo, kind_0: OpdKind, kind_1: OpdKind) -> ThreadedI
 
 fn selecy_copy_opd_to_stack(type_: ValType, kind: OpdKind) -> ThreadedInstr {
     match kind {
-        OpdKind::Stack => select_copy_stack(type_),
+        OpdKind::Stk => select_copy_stack(type_),
         OpdKind::Reg => select_copy_reg_to_stack(type_),
         OpdKind::Imm => select_copy_imm_to_stack(type_),
     }
