@@ -1,4 +1,5 @@
 mod aliasable_box;
+mod cast;
 mod code;
 mod compile;
 mod config;

@@ -2,6 +2,7 @@
 
 use {
     crate::{
+        cast::{ExtendingCast, ExtendingCastFrom, WrappingCast, WrappingCastFrom},
         code::{Code, InstrSlot},
         data::UnguardedData,
         downcast::{DowncastMut, DowncastRef},
@@ -1016,503 +1017,109 @@ where
 
 // Memory instructions
 
-macro_rules! load {
-    ($load_s:ident, $load_r:ident, $load_i:ident, $T:ty, $U:ty) => {
-        threaded_instr!($load_s(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (dyn_offset, ip): (u32, _) = read_stack(ip, sp);
-            let (static_offset, ip): (u32, _) = read_imm(ip);
-
-            // Perform operation
-            let offset = dyn_offset as u64 + static_offset as u64;
-            if offset + mem::size_of::<$T>() as u64 > ms as u64 {
-                return ControlFlow::Trap(Trap::MemAccessOutOfBounds).to_bits();
-            }
-            let mut bytes = [0u8; mem::size_of::<$T>()];
-            ptr::copy_nonoverlapping(md.add(offset as usize), bytes.as_mut_ptr(), bytes.len());
-            let y = <$T>::from_le_bytes(bytes) as $U;
-
-            // Write result
-            let (ix, sx, dx) = write_reg(ix, sx, dx, y);
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($load_r(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let dyn_offset: u32 = read_reg(ix, sx, dx);
-            let (static_offset, ip): (u32, _) = read_imm(ip);
-
-            // Perform operation
-            let offset = dyn_offset as u64 + static_offset as u64;
-            if offset + mem::size_of::<$T>() as u64 > ms as u64 {
-                return ControlFlow::Trap(Trap::MemAccessOutOfBounds).to_bits();
-            }
-            let mut bytes = [0u8; mem::size_of::<$T>()];
-            ptr::copy_nonoverlapping(md.add(offset as usize), bytes.as_mut_ptr(), bytes.len());
-            let y = <$T>::from_le_bytes(bytes) as $U;
-
-            // Write result
-            let (ix, sx, dx) = write_reg(ix, sx, dx, y);
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($load_i(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (dyn_offset, ip): (u32, _) = read_imm(ip);
-            let (static_offset, ip): (u32, _) = read_imm(ip);
-
-            // Perform operation
-            let offset = dyn_offset as u64 + static_offset as u64;
-            if offset + mem::size_of::<$T>() as u64 > ms as u64 {
-                return ControlFlow::Trap(Trap::MemAccessOutOfBounds).to_bits();
-            }
-            let mut bytes = [0u8; mem::size_of::<$T>()];
-            ptr::copy_nonoverlapping(md.add(offset as usize), bytes.as_mut_ptr(), bytes.len());
-            let y = <$T>::from_le_bytes(bytes) as $U;
-
-            // Write result
-            let (ix, sx, dx) = write_reg(ix, sx, dx, y);
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-    };
+pub(crate) unsafe extern "C" fn load<T, R, W>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where
+    T: ReadFromPtr,
+    R: Read<u32>,
+    W: Write<T>,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let offset = R::read(&mut args);
+        let base = args.read_imm();
+        let val = r#try!(args.load(base, offset));
+        W::write(&mut args, val);
+        args.next()
+    }
 }
 
-macro_rules! store {
-    (
-        $store_ss:ident,
-        $store_rs:ident,
-        $store_is:ident,
-        $store_ir:ident,
-        $store_ii:ident,
-        $store_sr:ident,
-        $store_si:ident,
-        $store_ri:ident,
-        $T:ty,
-        $U:ty
-    ) => {
-        threaded_instr!($store_ss(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (x, ip): ($T, _) = read_stack(ip, sp);
-            let (dyn_offset, ip): (u32, _) = read_stack(ip, sp);
-            let (static_offset, ip): (u32, _) = read_imm(ip);
-
-            // Perform operation
-            let offset = dyn_offset as u64 + static_offset as u64;
-            if offset + mem::size_of::<$U>() as u64 > ms as u64 {
-                return ControlFlow::Trap(Trap::MemAccessOutOfBounds).to_bits();
-            }
-            let bytes = (x as $U).to_le_bytes();
-            ptr::copy_nonoverlapping(bytes.as_ptr(), md.add(offset as usize), bytes.len());
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($store_rs(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (x, ip): ($T, _) = read_stack(ip, sp);
-            let dyn_offset: u32 = read_reg(ix, sx, dx);
-            let (static_offset, ip): (u32, _) = read_imm(ip);
-
-            // Perform operation
-            let offset = dyn_offset as u64 + static_offset as u64;
-            if offset + mem::size_of::<$U>() as u64 > ms as u64 {
-                return ControlFlow::Trap(Trap::MemAccessOutOfBounds).to_bits();
-            }
-            let bytes = (x as $U).to_le_bytes();
-            ptr::copy_nonoverlapping(bytes.as_ptr(), md.add(offset as usize), bytes.len());
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($store_is(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (x, ip): ($T, _) = read_stack(ip, sp);
-            let (dyn_offset, ip): (u32, _) = read_imm(ip);
-            let (static_offset, ip): (u32, _) = read_imm(ip);
-
-            // Perform operation
-            let offset = dyn_offset as u64 + static_offset as u64;
-            if offset + mem::size_of::<$U>() as u64 > ms as u64 {
-                return ControlFlow::Trap(Trap::MemAccessOutOfBounds).to_bits();
-            }
-            let bytes = (x as $U).to_le_bytes();
-            ptr::copy_nonoverlapping(bytes.as_ptr(), md.add(offset as usize), bytes.len());
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($store_ir(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let x: $T = read_reg(ix, sx, dx);
-            let (dyn_offset, ip): (u32, _) = read_imm(ip);
-            let (static_offset, ip): (u32, _) = read_imm(ip);
-
-            // Perform operation
-            let offset = dyn_offset as u64 + static_offset as u64;
-            if offset + mem::size_of::<$U>() as u64 > ms as u64 {
-                return ControlFlow::Trap(Trap::MemAccessOutOfBounds).to_bits();
-            }
-            let bytes = (x as $U).to_le_bytes();
-            ptr::copy_nonoverlapping(bytes.as_ptr(), md.add(offset as usize), bytes.len());
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($store_ii(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (x, ip): ($T, _) = read_imm(ip);
-            let (dyn_offset, ip): (u32, _) = read_imm(ip);
-            let (static_offset, ip): (u32, _) = read_imm(ip);
-
-            // Perform operation
-            let offset = dyn_offset as u64 + static_offset as u64;
-            if offset + mem::size_of::<$U>() as u64 > ms as u64 {
-                return ControlFlow::Trap(Trap::MemAccessOutOfBounds).to_bits();
-            }
-            let bytes = (x as $U).to_le_bytes();
-            ptr::copy_nonoverlapping(bytes.as_ptr(), md.add(offset as usize), bytes.len());
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($store_sr(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let x: $T = read_reg(ix, sx, dx);
-            let (dyn_offset, ip): (u32, _) = read_stack(ip, sp);
-            let (static_offset, ip): (u32, _) = read_imm(ip);
-
-            // Perform operation
-            let offset = dyn_offset as u64 + static_offset as u64;
-            if offset + mem::size_of::<$U>() as u64 > ms as u64 {
-                return ControlFlow::Trap(Trap::MemAccessOutOfBounds).to_bits();
-            }
-            let bytes = (x as $U).to_le_bytes();
-            ptr::copy_nonoverlapping(bytes.as_ptr(), md.add(offset as usize), bytes.len());
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($store_si(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (x, ip): ($T, _) = read_imm(ip);
-            let (dyn_offset, ip): (u32, _) = read_stack(ip, sp);
-            let (static_offset, ip): (u32, _) = read_imm(ip);
-
-            // Perform operation
-            let offset = dyn_offset as u64 + static_offset as u64;
-            if offset + mem::size_of::<$U>() as u64 > ms as u64 {
-                return ControlFlow::Trap(Trap::MemAccessOutOfBounds).to_bits();
-            }
-            let bytes = (x as $U).to_le_bytes();
-            ptr::copy_nonoverlapping(bytes.as_ptr(), md.add(offset as usize), bytes.len());
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($store_ri(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (x, ip): ($T, _) = read_imm(ip);
-            let dyn_offset: u32 = read_reg(ix, sx, dx);
-            let (static_offset, ip): (u32, _) = read_imm(ip);
-
-            // Perform operation
-            let offset = dyn_offset as u64 + static_offset as u64;
-            if offset + mem::size_of::<$U>() as u64 > ms as u64 {
-                return ControlFlow::Trap(Trap::MemAccessOutOfBounds).to_bits();
-            }
-            let bytes = (x as $U).to_le_bytes();
-            ptr::copy_nonoverlapping(bytes.as_ptr(), md.add(offset as usize), bytes.len());
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-    };
+pub(crate) unsafe extern "C" fn load_n<Dst, Src, R, W>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where
+    Dst: ExtendingCastFrom<Src>,
+    Src: ReadFromPtr + ExtendingCast,
+    R: Read<u32>,
+    W: Write<Dst>,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let offset = R::read(&mut args);
+        let base = args.read_imm();
+        let src: Src = r#try!(args.load(base, offset));
+        let dst = src.extending_cast();
+        W::write(&mut args, dst);
+        args.next()
+    }
 }
 
-macro_rules! store_float {
-    (
-        $store_ss:ident,
-        $store_rs:ident,
-        $store_is:ident,
-        $store_ir:ident,
-        $store_ii:ident,
-        $store_sr:ident,
-        $store_si:ident,
-        $store_ri:ident,
-        $store_rr:ident,
-        $T:ty,
-        $U:ty
-    ) => {
-        store!(
-            $store_ss, $store_rs, $store_is, $store_ir, $store_ii, $store_sr, $store_si, $store_ri,
-            $T, $U
-        );
-
-        threaded_instr!($store_rr(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let x: $T = read_reg(ix, sx, dx);
-            let dyn_offset: u32 = read_reg(ix, sx, dx);
-            let (static_offset, ip): (u32, _) = read_imm(ip);
-
-            // Perform operation
-            let offset = dyn_offset as u64 + static_offset as u64;
-            if offset + mem::size_of::<$U>() as u64 > ms as u64 {
-                return ControlFlow::Trap(Trap::MemAccessOutOfBounds).to_bits();
-            }
-            let bytes = (x as $U).to_le_bytes();
-            ptr::copy_nonoverlapping(bytes.as_ptr(), md.add(offset as usize), bytes.len());
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-    };
+pub(crate) unsafe extern "C" fn store<T, R0, R1>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where
+    T: WriteToPtr,
+    R1: Read<T>,
+    R0: Read<u32>,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let val = R1::read(&mut args);
+        let offset = R0::read(&mut args);
+        let base: u32 = args.read_imm();
+        r#try!(args.store(base, offset, val));
+        args.next()
+    }
 }
 
-load!(i32_load_s, i32_load_r, i32_load_i, i32, i32);
-load!(i64_load_s, i64_load_r, i64_load_i, i64, i64);
-load!(f32_load_s, f32_load_r, f32_load_i, f32, f32);
-load!(f64_load_s, f64_load_r, f64_load_i, f64, f64);
-load!(i32_load8_s_s, i32_load8_s_r, i32_load8_s_i, i8, i32);
-load!(i32_load8_u_s, i32_load8_u_r, i32_load8_u_i, u8, u32);
-load!(i32_load16_s_s, i32_load16_s_r, i32_load16_s_i, i16, i32);
-load!(i32_load16_u_s, i32_load16_u_r, i32_load16_u_i, u16, u32);
-load!(i64_load8_s_s, i64_load8_s_r, i64_load8_s_i, i8, i64);
-load!(i64_load8_u_s, i64_load8_u_r, i64_load8_u_i, u8, u64);
-load!(i64_load16_s_s, i64_load16_s_r, i64_load16_s_i, i16, i64);
-load!(i64_load16_u_s, i64_load16_u_r, i64_load16_u_i, u16, u64);
-load!(i64_load32_s_s, i64_load32_s_r, i64_load32_s_i, i32, i64);
-load!(i64_load32_u_s, i64_load32_u_r, i64_load32_u_i, u32, u64);
-store!(
-    i32_store_ss,
-    i32_store_rs,
-    i32_store_is,
-    i32_store_ir,
-    i32_store_ii,
-    i32_store_sr,
-    i32_store_si,
-    i32_store_ri,
-    i32,
-    i32
-);
-store!(
-    i64_store_ss,
-    i64_store_rs,
-    i64_store_is,
-    i64_store_ir,
-    i64_store_ii,
-    i64_store_sr,
-    i64_store_si,
-    i64_store_ri,
-    i64,
-    i64
-);
-store_float!(
-    f32_store_ss,
-    f32_store_rs,
-    f32_store_is,
-    f32_store_ir,
-    f32_store_ii,
-    f32_store_sr,
-    f32_store_si,
-    f32_store_ri,
-    f32_store_rr,
-    f32,
-    f32
-);
-store_float!(
-    f64_store_ss,
-    f64_store_rs,
-    f64_store_is,
-    f64_store_ir,
-    f64_store_ii,
-    f64_store_sr,
-    f64_store_si,
-    f64_store_ri,
-    f64_store_rr,
-    f64,
-    f64
-);
-store!(
-    i32_store8_ss,
-    i32_store8_rs,
-    i32_store8_is,
-    i32_store8_ir,
-    i32_store8_ii,
-    i32_store8_sr,
-    i32_store8_si,
-    i32_store8_ri,
-    u32,
-    u8
-);
-store!(
-    i32_store16_ss,
-    i32_store16_rs,
-    i32_store16_is,
-    i32_store16_ir,
-    i32_store16_ii,
-    i32_store16_sr,
-    i32_store16_si,
-    i32_store16_ri,
-    u32,
-    u16
-);
-store!(
-    i64_store8_ss,
-    i64_store8_rs,
-    i64_store8_is,
-    i64_store8_ir,
-    i64_store8_ii,
-    i64_store8_sr,
-    i64_store8_si,
-    i64_store8_ri,
-    u64,
-    u8
-);
-store!(
-    i64_store16_ss,
-    i64_store16_rs,
-    i64_store16_is,
-    i64_store16_ir,
-    i64_store16_ii,
-    i64_store16_sr,
-    i64_store16_si,
-    i64_store16_ri,
-    u64,
-    u16
-);
-store!(
-    i64_store32_ss,
-    i64_store32_rs,
-    i64_store32_is,
-    i64_store32_ir,
-    i64_store32_ii,
-    i64_store32_sr,
-    i64_store32_si,
-    i64_store32_ri,
-    u64,
-    u32
-);
+pub(crate) unsafe extern "C" fn store_n<Src, Dst, R0, R1>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where
+    Src: WrappingCast,
+    Dst: WrappingCastFrom<Src> + WriteToPtr,
+    R1: Read<Src>,
+    R0: Read<u32>,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let src = R1::read(&mut args);
+        let offset = R0::read(&mut args);
+        let base: u32 = args.read_imm();
+        let dst: Dst = src.wrapping_cast();
+        r#try!(args.store(base, offset, dst));
+        args.next()
+    }
+}
 
 threaded_instr!(memory_size(
     ip: Ip,
@@ -1966,6 +1573,18 @@ impl<'a> Args<'a> {
         }
     }
 
+    unsafe fn load<T>(&self, base: u32, offset: u32) -> Result<T, Trap>
+    where 
+        T: ReadFromPtr
+    {
+        let start = base as u64 + offset as u64;
+        let end = start + size_of::<T>() as u64;
+        if end > self.ms as u64 {
+            return Err(Trap::MemAccessOutOfBounds);
+        }
+        unsafe { Ok(T::read_from_ptr(self.md.add(start as usize).cast())) }
+    }
+
     unsafe fn write_stk<T>(&mut self, val: T) {
         unsafe {
             let offset = self.read_imm();
@@ -1988,6 +1607,18 @@ impl<'a> Args<'a> {
         self.ix = ix;
         self.sx = sx;
         self.dx = dx;
+    }
+
+    unsafe fn store<T>(&mut self, base: u32, offset: u32, val: T) -> Result<(), Trap>
+    where 
+        T: WriteToPtr
+    {
+        let start = base as u64 + offset as u64;
+        let end = start + size_of::<T>() as u64;
+        if end > self.ms as u64 {
+            return Err(Trap::MemAccessOutOfBounds);
+        }
+        unsafe { Ok(val.write_to_ptr(self.md.add(start as usize).cast())) }
     }
     
     unsafe fn next(mut self) -> ControlFlowBits {
@@ -2048,6 +1679,47 @@ where
         args.write_reg(val)
     }
 }
+
+pub(crate) trait ReadFromPtr: Copy {
+    unsafe fn read_from_ptr(ptr: *const u8) -> Self;
+}
+
+macro_rules! impl_read_from_ptr {
+    ($($T:ty),*) => {
+        $(
+            impl ReadFromPtr for $T {
+                unsafe fn read_from_ptr(ptr: *const u8) -> Self {
+                    let mut bytes = [0u8; size_of::<$T>()];
+                    ptr::copy_nonoverlapping(ptr, bytes.as_mut_ptr(), bytes.len());
+                    <$T>::from_le_bytes(bytes)
+                }
+            }
+        )*
+    };
+}
+
+impl_read_from_ptr! { i8, u8, i16, u16, i32, u32, i64, u64, f32, f64 }
+
+pub(crate) trait WriteToPtr {
+    fn write_to_ptr(self, ptr: *mut u8);
+}
+
+macro_rules! impl_write_to_ptr {
+    ($($T:ty),*) => {
+        $(
+            impl WriteToPtr for $T {
+                fn write_to_ptr(self, ptr: *mut u8) {
+                    let bytes = self.to_le_bytes();
+                    unsafe {
+                        ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, bytes.len());
+                    }
+                }
+            }
+        )*
+    };
+}
+
+impl_write_to_ptr! { i8, u8, i16, u16, i32, u32, i64, u64, f32, f64 }
 
 /// Executes the next instruction.
 pub(crate) unsafe fn next_instr(
