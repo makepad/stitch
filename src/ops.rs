@@ -404,7 +404,7 @@ macro_rules! impl_float_ops {
                 type Output = $T;
 
                 fn bin_op(x0: $T, x1: $T) -> Result<Self::Output, Trap> {
-                    let sign_mask = 1 << (mem::size_of::<Self>() * 8) - 1;
+                    let sign_mask = 1 << (mem::size_of::<$T>() * 8) - 1;
                     let bits_0 = x0.to_bits();
                     let bits_1 = x1.to_bits();
                     let sign_0 = bits_0 & sign_mask != 0;
