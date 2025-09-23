@@ -4,8 +4,8 @@ use {
     crate::{
         code::{Code, InstrSlot},
         data::UnguardedData,
-        downcast::{DowncastRef, DowncastMut},
-        elem::UnguardedElem,
+        downcast::{DowncastMut, DowncastRef},
+        elem::{ElemEntity, ElemEntityT, UnguardedElem},
         error::Error,
         extern_::UnguardedExtern,
         extern_ref::UnguardedExternRef,
@@ -16,7 +16,7 @@ use {
         ops::*,
         stack::{Stack, StackGuard, StackSlot},
         store::{Handle, Store, UnguardedInternedFuncType},
-        table::UnguardedTable,
+        table::{TableEntity, TableEntityT, UnguardedTable},
         trap::Trap,
         val::{UnguardedVal, Val},
     },
@@ -787,585 +787,232 @@ where
 
 // Table instructions
 
-macro_rules! table_get {
-    ($table_get_s:ident, $table_get_r:ident, $table_get_i:ident, $T:ty) => {
-        threaded_instr!($table_get_s(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (idx, ip) = read_stack(ip, sp);
-            let (table, ip): (UnguardedTable, _) = read_imm(ip);
-
-            // Perform operation
-            let val = r#try!(table
-                .as_ref()
-                .downcast_ref::<$T>()
-                .unwrap_unchecked()
-                .get(idx)
-                .ok_or(Trap::TableAccessOutOfBounds));
-
-            // Write result
-            let ip = write_stack(ip, sp, val);
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($table_get_r(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let idx = read_reg(ix, sx, dx);
-            let (table, ip): (UnguardedTable, _) = read_imm(ip);
-
-            // Perform operation
-            let val = r#try!(table
-                .as_ref()
-                .downcast_ref::<$T>()
-                .unwrap_unchecked()
-                .get(idx)
-                .ok_or(Trap::TableAccessOutOfBounds));
-
-            // Write result
-            let ip = write_stack(ip, sp, val);
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($table_get_i(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (idx, ip) = read_imm(ip);
-            let (table, ip): (UnguardedTable, _) = read_imm(ip);
-
-            // Perform operation
-            let val = r#try!(table
-                .as_ref()
-                .downcast_ref::<$T>()
-                .unwrap_unchecked()
-                .get(idx)
-                .ok_or(Trap::TableAccessOutOfBounds));
-
-            // Write result
-            let ip = write_stack(ip, sp, val);
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-    };
+pub(crate) unsafe extern "C" fn table_get<T, R, W> (
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where
+    TableEntityT<T>: DowncastRef<TableEntity>,
+    T: Copy,
+    R: Read<u32>,
+    W: Write<T>,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let idx = R::read(&mut args);
+        let table: UnguardedTable = args.read_imm();
+        let table = table.as_ref().downcast_ref::<T>().unwrap_unchecked();
+        let val = r#try!(table.get(idx).ok_or(Trap::TableAccessOutOfBounds));
+        W::write(&mut args, val);
+        args.next() 
+    }
 }
 
-table_get!(
-    table_get_func_ref_s,
-    table_get_func_ref_r,
-    table_get_func_ref_i,
-    UnguardedFuncRef
-);
-table_get!(
-    table_get_extern_ref_s,
-    table_get_extern_ref_r,
-    table_get_extern_ref_i,
-    UnguardedExternRef
-);
-
-macro_rules! table_set {
-    (
-        $table_set_ss:ident,
-        $table_set_rs:ident,
-        $table_set_is:ident,
-        $table_set_ir:ident,
-        $table_set_ii:ident,
-        $table_set_sr:ident,
-        $table_set_si:ident,
-        $table_set_ri:ident,
-        $T:ty
-    ) => {
-        threaded_instr!($table_set_ss(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (val, ip) = read_stack(ip, sp);
-            let (idx, ip) = read_stack(ip, sp);
-            let (mut table, ip): (UnguardedTable, _) = read_imm(ip);
-
-            // Perform operation
-            r#try!(table
-                .as_mut()
-                .downcast_mut::<$T>()
-                .unwrap_unchecked()
-                .set(idx, val)
-                .map_err(|_| Trap::TableAccessOutOfBounds));
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($table_set_rs(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (val, ip) = read_stack(ip, sp);
-            let idx = read_reg(ix, sx, dx);
-            let (mut table, ip): (UnguardedTable, _) = read_imm(ip);
-
-            // Perform operation
-            r#try!(table
-                .as_mut()
-                .downcast_mut::<$T>()
-                .unwrap_unchecked()
-                .set(idx, val)
-                .map_err(|_| Trap::TableAccessOutOfBounds));
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($table_set_is(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (val, ip) = read_stack(ip, sp);
-            let (idx, ip) = read_imm(ip);
-            let (mut table, ip): (UnguardedTable, _) = read_imm(ip);
-
-            // Perform operation
-            r#try!(table
-                .as_mut()
-                .downcast_mut::<$T>()
-                .unwrap_unchecked()
-                .set(idx, val)
-                .map_err(|_| Trap::TableAccessOutOfBounds));
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($table_set_ir(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let val = read_reg(ix, sx, dx);
-            let (idx, ip) = read_imm(ip);
-            let (mut table, ip): (UnguardedTable, _) = read_imm(ip);
-
-            // Perform operation
-            r#try!(table
-                .as_mut()
-                .downcast_mut::<$T>()
-                .unwrap_unchecked()
-                .set(idx, val)
-                .map_err(|_| Trap::TableAccessOutOfBounds));
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($table_set_ii(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (val, ip) = read_imm(ip);
-            let (idx, ip) = read_imm(ip);
-            let (mut table, ip): (UnguardedTable, _) = read_imm(ip);
-
-            // Perform operation
-            r#try!(table
-                .as_mut()
-                .downcast_mut::<$T>()
-                .unwrap_unchecked()
-                .set(idx, val)
-                .map_err(|_| Trap::TableAccessOutOfBounds));
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($table_set_sr(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let val = read_reg(ix, sx, dx);
-            let (idx, ip) = read_stack(ip, sp);
-            let (mut table, ip): (UnguardedTable, _) = read_imm(ip);
-
-            // Perform operation
-            r#try!(table
-                .as_mut()
-                .downcast_mut::<$T>()
-                .unwrap_unchecked()
-                .set(idx, val)
-                .map_err(|_| Trap::TableAccessOutOfBounds));
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($table_set_si(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (val, ip) = read_imm(ip);
-            let (idx, ip) = read_stack(ip, sp);
-            let (mut table, ip): (UnguardedTable, _) = read_imm(ip);
-
-            // Perform operation
-            r#try!(table
-                .as_mut()
-                .downcast_mut::<$T>()
-                .unwrap_unchecked()
-                .set(idx, val)
-                .map_err(|_| Trap::TableAccessOutOfBounds));
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($table_set_ri(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (val, ip) = read_imm(ip);
-            let idx = read_reg(ix, sx, dx);
-            let (mut table, ip): (UnguardedTable, _) = read_imm(ip);
-
-            // Perform operation
-            r#try!(table
-                .as_mut()
-                .downcast_mut::<$T>()
-                .unwrap_unchecked()
-                .set(idx, val)
-                .map_err(|_| Trap::TableAccessOutOfBounds));
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-    };
+pub(crate) unsafe extern "C" fn table_set<T, R0, R1> (
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where
+    TableEntityT<T>: DowncastMut<TableEntity>,
+    T: Copy,
+    R0: Read<u32>,
+    R1: Read<T>,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let val = R1::read(&mut args);
+        let idx = R0::read(&mut args);
+        let mut table: UnguardedTable = args.read_imm();
+        let table = table.as_mut().downcast_mut::<T>().unwrap_unchecked();
+        r#try!(table.set(idx, val).map_err(|_| Trap::TableAccessOutOfBounds));
+        args.next() 
+    }
 }
 
-table_set!(
-    table_set_func_ref_ss,
-    table_set_func_ref_rs,
-    table_set_func_ref_is,
-    table_set_func_ref_ir,
-    table_set_func_ref_ii,
-    table_set_func_ref_sr,
-    table_set_func_ref_si,
-    table_set_func_ref_ri,
-    UnguardedFuncRef
-);
-table_set!(
-    table_set_extern_ref_ss,
-    table_set_extern_ref_rs,
-    table_set_extern_ref_is,
-    table_set_extern_ref_ir,
-    table_set_extern_ref_ii,
-    table_set_extern_ref_sr,
-    table_set_extern_ref_si,
-    table_set_extern_ref_ri,
-    UnguardedExternRef
-);
-
-macro_rules! table_size {
-    ($table_size:ident, $T:ty) => {
-        threaded_instr!($table_size(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (table, ip): (UnguardedTable, _) = read_imm(ip);
-
-            // Perform operation
-            let size = table
-                .as_ref()
-                .downcast_ref::<$T>()
-                .unwrap_unchecked()
-                .size();
-
-            // Write result
-            let ip = write_stack(ip, sp, size);
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-    };
+pub(crate) unsafe extern "C" fn table_size<T, W>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where
+    TableEntityT<T>: DowncastRef<TableEntity>,
+    T: Copy,
+    W: Write<u32>,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let table: UnguardedTable = args.read_imm();
+        let table = table.as_ref().downcast_ref::<T>().unwrap_unchecked();
+        let size = table.size();
+        W::write(&mut args, size);
+        args.next()
+    }
 }
 
-table_size!(table_size_func_ref, UnguardedFuncRef);
-table_size!(table_size_extern_ref, UnguardedExternRef);
-
-macro_rules! table_grow {
-    ($table_grow:ident, $T:ty) => {
-        threaded_instr!($table_grow(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (count, ip): (u32, _) = read_stack(ip, sp);
-            let (val, ip) = read_stack(ip, sp);
-
-            // Perform operation
-            let (mut table, ip): (UnguardedTable, _) = read_imm(ip);
-
-            // Perform operation
-            let old_size = table
-                .as_mut()
-                .downcast_mut::<$T>()
-                .unwrap_unchecked()
-                .grow(val, count)
-                .unwrap_or(u32::MAX);
-
-            // Write result
-            let ip = write_stack(ip, sp, old_size);
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-    };
+pub(crate) unsafe extern "C" fn table_grow<T, R0, R1, W>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where
+    TableEntityT<T>: DowncastMut<TableEntity>,
+    T: Copy,
+    R0: Read<T>,
+    R1: Read<u32>,
+    W: Write<u32>,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let count = R1::read(&mut args);
+        let val = R0::read(&mut args);
+        let mut table: UnguardedTable = args.read_imm();
+        let table = table.as_mut().downcast_mut::<T>().unwrap_unchecked();
+        let old_size = table.grow(val, count).unwrap_or(u32::MAX);
+        W::write(&mut args, old_size);
+        args.next()
+    }
 }
 
-table_grow!(table_grow_func_ref, UnguardedFuncRef);
-table_grow!(table_grow_extern_ref, UnguardedExternRef);
-
-macro_rules! table_fill {
-    ($table_fill:ident, $T:ty) => {
-        threaded_instr!($table_fill(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (count, ip): (u32, _) = read_stack(ip, sp);
-            let (val, ip) = read_stack(ip, sp);
-            let (idx, ip): (u32, _) = read_stack(ip, sp);
-            let (mut table, ip): (UnguardedTable, _) = read_imm(ip);
-
-            // Perform operation
-            r#try!(table
-                .as_mut()
-                .downcast_mut::<$T>()
-                .unwrap_unchecked()
-                .fill(idx, val, count));
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-    };
+pub(crate) unsafe extern "C" fn table_fill<T, R0, R1, R2>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where
+    TableEntityT<T>: DowncastMut<TableEntity>,
+    T: Copy,
+    R0: Read<u32>,
+    R1: Read<T>,
+    R2: Read<u32>,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let count = R2::read(&mut args);
+        let val = R1::read(&mut args);
+        let idx = R0::read(&mut args);
+        let mut table: UnguardedTable = args.read_imm();
+        let table = table.as_mut().downcast_mut::<T>().unwrap_unchecked();
+        r#try!(table.fill(idx, val, count));
+        args.next()
+    }   
 }
 
-table_fill!(table_fill_func_ref, UnguardedFuncRef);
-table_fill!(table_fill_extern_ref, UnguardedExternRef);
-
-macro_rules! table_copy {
-    ($table_copy:ident, $T:ty) => {
-        threaded_instr!($table_copy(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (count, ip): (u32, _) = read_stack(ip, sp);
-            let (src_offset, ip): (u32, _) = read_stack(ip, sp);
-            let (dst_offset, ip): (u32, _) = read_stack(ip, sp);
-            let (mut dst_table, ip): (UnguardedTable, _) = read_imm(ip);
-            let (src_table, ip): (UnguardedTable, _) = read_imm(ip);
-
-            // Perform operation
-            r#try!(if dst_table == src_table {
-                dst_table
-                    .as_mut()
-                    .downcast_mut::<$T>()
-                    .unwrap_unchecked()
-                    .copy_within(dst_offset, src_offset, count)
-            } else {
-                dst_table
-                    .as_mut()
-                    .downcast_mut::<$T>()
-                    .unwrap_unchecked()
-                    .copy(
-                        dst_offset,
-                        src_table.as_ref().downcast_ref::<$T>().unwrap_unchecked(),
-                        src_offset,
-                        count,
-                    )
-            });
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
+pub(crate) unsafe extern "C" fn table_copy<T, R0, R1, R2>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where
+    TableEntityT<T>: DowncastRef<TableEntity> + DowncastMut<TableEntity>,
+    T: Copy,
+    R0: Read<u32>,
+    R1: Read<u32>,
+    R2: Read<u32>,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let count = R2::read(&mut args);
+        let src_idx = R1::read(&mut args);
+        let dst_idx = R0::read(&mut args);
+        let mut dst_table: UnguardedTable = args.read_imm();
+        let dst_table = dst_table.as_mut().downcast_mut::<T>().unwrap_unchecked();
+        let src_table: UnguardedTable = args.read_imm();
+        let src_table = src_table.as_ref().downcast_ref::<T>().unwrap_unchecked();
+        r#try!(if dst_table as *const _ == src_table as *const _ {
+            dst_table.copy_within(dst_idx, src_idx, count)
+        } else {
+            dst_table.copy(dst_idx, src_table, src_idx, count)
         });
-    };
+        args.next()
+    }
 }
 
-table_copy!(table_copy_func_ref, UnguardedFuncRef);
-table_copy!(table_copy_extern_ref, UnguardedExternRef);
-
-macro_rules! table_init {
-    ($table_init:ident, $T:ty) => {
-        threaded_instr!($table_init(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (count, ip): (u32, _) = read_stack(ip, sp);
-            let (src_offset, ip): (u32, _) = read_stack(ip, sp);
-            let (dst_offset, ip): (u32, _) = read_stack(ip, sp);
-            let (mut dst_table, ip): (UnguardedTable, _) = read_imm(ip);
-            let (src_elem, ip): (UnguardedElem, _) = read_imm(ip);
-
-            // Perform operation
-            r#try!(dst_table
-                .as_mut()
-                .downcast_mut::<$T>()
-                .unwrap_unchecked()
-                .init(
-                    dst_offset,
-                    src_elem.as_ref().downcast_ref::<$T>().unwrap_unchecked(),
-                    src_offset,
-                    count
-                ));
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-    };
+pub(crate) unsafe extern "C" fn table_init<T, R0, R1, R2>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where
+    TableEntityT<T>: DowncastMut<TableEntity>,
+    ElemEntityT<T>: DowncastRef<ElemEntity>,
+    T: Copy,
+    R0: Read<u32>,
+    R1: Read<u32>,
+    R2: Read<u32>,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let count = R2::read(&mut args);
+        let src_offset = R1::read(&mut args);
+        let dst_offset = R0::read(&mut args);
+        let mut dst_table: UnguardedTable = args.read_imm();
+        let dst_table = dst_table.as_mut().downcast_mut::<T>().unwrap_unchecked();
+        let src_elem: UnguardedElem = args.read_imm();
+        let src_elem = src_elem.as_ref().downcast_ref::<T>().unwrap_unchecked();
+        r#try!(dst_table.init(dst_offset, src_elem, src_offset, count));
+        args.next()
+    }
 }
 
-table_init!(table_init_func_ref, UnguardedFuncRef);
-table_init!(table_init_extern_ref, UnguardedExternRef);
-
-macro_rules! elem_drop {
-    ($elem_drop:ident, $T:ty) => {
-        threaded_instr!($elem_drop(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (mut elem, ip): (UnguardedElem, _) = read_imm(ip);
-
-            // Perform operation
-            elem.as_mut()
-                .downcast_mut::<$T>()
-                .unwrap_unchecked()
-                .drop_elems();
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-    };
+pub(crate) unsafe extern "C" fn elem_drop<T>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where
+    ElemEntityT<T>: DowncastMut<ElemEntity>,
+    T: Copy,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let mut elem: UnguardedElem = args.read_imm();
+        let elem = elem.as_mut().downcast_mut::<T>().unwrap_unchecked();
+        elem.drop_elems();
+        args.next()
+    }
 }
-
-elem_drop!(elem_drop_func_ref, UnguardedFuncRef);
-elem_drop!(elem_drop_extern_ref, UnguardedExternRef);
 
 // Memory instructions
 

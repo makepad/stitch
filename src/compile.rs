@@ -7,7 +7,7 @@ use {
             StoreInfo, UnOpInfo, UncompiledCode,
         },
         decode::DecodeError,
-        downcast::DowncastMut,
+        downcast::{DowncastRef, DowncastMut},
         exec,
         exec::{Imm, ReadReg, Reg, Stk, ThreadedInstr, WriteReg},
         extern_ref::{ExternRef, UnguardedExternRef},
@@ -18,6 +18,7 @@ use {
         ref_::RefType,
         stack::StackSlot,
         store::Store,
+        table::{TableEntity, TableEntityT},
         val::{UnguardedVal, ValType},
     },
     std::{mem, ops::Deref},
@@ -2277,24 +2278,24 @@ enum OpdKind {
 fn select_br_if_z(kind: OpdKind) -> ThreadedInstr {
     match kind {
         OpdKind::Imm => exec::br_if_z::<Imm>,
-        OpdKind::Reg => exec::br_if_z::<Reg>,
         OpdKind::Stk => exec::br_if_z::<Stk>,
+        OpdKind::Reg => exec::br_if_z::<Reg>,
     }
 }
 
 fn select_br_if_nz(kind: OpdKind) -> ThreadedInstr {
     match kind {
         OpdKind::Imm => exec::br_if_nz::<Imm>,
-        OpdKind::Reg => exec::br_if_nz::<Reg>,
         OpdKind::Stk => exec::br_if_nz::<Stk>,
+        OpdKind::Reg => exec::br_if_nz::<Reg>,
     }
 }
 
 fn select_br_table(kind: OpdKind) -> ThreadedInstr {
     match kind {
         OpdKind::Imm => exec::br_table::<Imm>,
-        OpdKind::Reg => exec::br_table::<Reg>,
         OpdKind::Stk => exec::br_table::<Stk>,
+        OpdKind::Reg => exec::br_table::<Reg>,
     }
 }
 
@@ -2392,91 +2393,94 @@ where
 {
     match input {
         OpdKind::Imm => exec::global_set::<T, Imm>,
-        OpdKind::Reg => exec::global_set::<T, Reg>,
         OpdKind::Stk => exec::global_set::<T, Stk>,
+        OpdKind::Reg => exec::global_set::<T, Reg>,
     }
 }
 
-fn select_table_get(type_: RefType, kind: OpdKind) -> ThreadedInstr {
-    match (type_, kind) {
-        (RefType::FuncRef, OpdKind::Stk) => exec::table_get_func_ref_s,
-        (RefType::FuncRef, OpdKind::Reg) => exec::table_get_func_ref_r,
-        (RefType::FuncRef, OpdKind::Imm) => exec::table_get_func_ref_i,
-
-        (RefType::ExternRef, OpdKind::Stk) => exec::table_get_extern_ref_s,
-        (RefType::ExternRef, OpdKind::Reg) => exec::table_get_extern_ref_r,
-        (RefType::ExternRef, OpdKind::Imm) => exec::table_get_extern_ref_i,
+fn select_table_get(type_: RefType, input: OpdKind) -> ThreadedInstr {
+    match type_ {
+        RefType::FuncRef => select_table_get_typed::<UnguardedFuncRef>(input),
+        RefType::ExternRef => select_table_get_typed::<UnguardedExternRef>(input),
     }
 }
 
-fn select_table_set(type_: RefType, kind_0: OpdKind, kind_1: OpdKind) -> ThreadedInstr {
-    match (type_, kind_0, kind_1) {
-        (RefType::FuncRef, OpdKind::Stk, OpdKind::Stk) => exec::table_set_func_ref_ss,
-        (RefType::FuncRef, OpdKind::Reg, OpdKind::Stk) => exec::table_set_func_ref_rs,
-        (RefType::FuncRef, OpdKind::Imm, OpdKind::Stk) => exec::table_set_func_ref_is,
-        (RefType::FuncRef, OpdKind::Imm, OpdKind::Reg) => exec::table_set_func_ref_ir,
-        (RefType::FuncRef, OpdKind::Imm, OpdKind::Imm) => exec::table_set_func_ref_ii,
-        (RefType::FuncRef, OpdKind::Stk, OpdKind::Reg) => exec::table_set_func_ref_sr,
-        (RefType::FuncRef, OpdKind::Stk, OpdKind::Imm) => exec::table_set_func_ref_si,
-        (RefType::FuncRef, OpdKind::Reg, OpdKind::Imm) => exec::table_set_func_ref_ri,
+fn select_table_get_typed<T>(input: OpdKind) -> ThreadedInstr
+where
+    TableEntityT<T>: DowncastRef<TableEntity>,
+    T: Copy + ReadReg + WriteReg
+{
+    match input {
+        OpdKind::Imm => exec::table_get::<T, Imm, Stk>,
+        OpdKind::Stk => exec::table_get::<T, Stk, Stk>,
+        OpdKind::Reg => exec::table_get::<T, Reg, Stk>,
+    }
+}
 
-        (RefType::ExternRef, OpdKind::Stk, OpdKind::Stk) => exec::table_set_extern_ref_ss,
-        (RefType::ExternRef, OpdKind::Reg, OpdKind::Stk) => exec::table_set_extern_ref_rs,
-        (RefType::ExternRef, OpdKind::Imm, OpdKind::Stk) => exec::table_set_extern_ref_is,
-        (RefType::ExternRef, OpdKind::Imm, OpdKind::Reg) => exec::table_set_extern_ref_ir,
-        (RefType::ExternRef, OpdKind::Imm, OpdKind::Imm) => exec::table_set_extern_ref_ii,
-        (RefType::ExternRef, OpdKind::Stk, OpdKind::Reg) => exec::table_set_extern_ref_sr,
-        (RefType::ExternRef, OpdKind::Stk, OpdKind::Imm) => exec::table_set_extern_ref_si,
-        (RefType::ExternRef, OpdKind::Reg, OpdKind::Imm) => exec::table_set_extern_ref_ri,
+fn select_table_set(type_: RefType, input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr {
+    match type_ {
+        RefType::FuncRef => select_table_set_typed::<UnguardedFuncRef>(input_0, input_1),
+        RefType::ExternRef => select_table_set_typed::<UnguardedExternRef>(input_0, input_1),
+    }
+}
 
-        // The first operand is an integer, and the second operand is a reference, both of which
-        // are stored in an integer register. Since we only have one integer register available,
-        // there is no variant of table_set that can handle this case.
-        (RefType::FuncRef | RefType::ExternRef, OpdKind::Reg, OpdKind::Reg) => {
-            panic!("no suitable instruction found")
-        }
+fn select_table_set_typed<T>(input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr
+where
+    TableEntityT<T>: DowncastMut<TableEntity>,
+    T: Copy + ReadReg
+{
+    match (input_0, input_1) {
+        (OpdKind::Imm, OpdKind::Imm) => exec::table_set::<T, Imm, Imm>,
+        (OpdKind::Stk, OpdKind::Imm) => exec::table_set::<T, Stk, Imm>,
+        (OpdKind::Reg, OpdKind::Imm) => exec::table_set::<T, Reg, Imm>,
+        (OpdKind::Imm, OpdKind::Stk) => exec::table_set::<T, Imm, Stk>,
+        (OpdKind::Stk, OpdKind::Stk) => exec::table_set::<T, Stk, Stk>,
+        (OpdKind::Reg, OpdKind::Stk) => exec::table_set::<T, Reg, Stk>,
+        (OpdKind::Imm, OpdKind::Reg) => exec::table_set::<T, Imm, Reg>,
+        (OpdKind::Stk, OpdKind::Reg) => exec::table_set::<T, Stk, Reg>,
+        (OpdKind::Reg, OpdKind::Reg) => exec::table_set::<T, Reg, Reg>,
     }
 }
 
 fn select_table_size(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::table_size_func_ref,
-        RefType::ExternRef => exec::table_size_extern_ref,
+        RefType::FuncRef => exec::table_size::<UnguardedFuncRef, Stk>,
+        RefType::ExternRef => exec::table_size::<UnguardedExternRef, Stk>,
     }
 }
 
 fn select_table_grow(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::table_grow_func_ref,
-        RefType::ExternRef => exec::table_grow_extern_ref,
+        RefType::FuncRef => exec::table_grow::<UnguardedFuncRef, Stk, Stk, Stk>,
+        RefType::ExternRef => exec::table_grow::<UnguardedExternRef, Stk, Stk, Stk>,
     }
 }
 
 fn select_table_fill(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::table_fill_func_ref,
-        RefType::ExternRef => exec::table_fill_extern_ref,
+        RefType::FuncRef => exec::table_fill::<UnguardedFuncRef, Stk, Stk, Stk>,
+        RefType::ExternRef => exec::table_fill::<UnguardedExternRef, Stk, Stk, Stk>,
     }
 }
 
 fn select_table_copy(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::table_copy_func_ref,
-        RefType::ExternRef => exec::table_copy_extern_ref,
+        RefType::FuncRef => exec::table_copy::<UnguardedFuncRef, Stk, Stk, Stk>,
+        RefType::ExternRef => exec::table_copy::<UnguardedExternRef, Stk, Stk, Stk>,
     }
 }
 
 fn select_table_init(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::table_init_func_ref,
-        RefType::ExternRef => exec::table_init_extern_ref,
+        RefType::FuncRef => exec::table_init::<UnguardedFuncRef, Stk, Stk, Stk>,
+        RefType::ExternRef => exec::table_init::<UnguardedExternRef, Stk, Stk, Stk>,
     }
 }
 
 fn select_elem_drop(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::elem_drop_func_ref,
-        RefType::ExternRef => exec::elem_drop_extern_ref,
+        RefType::FuncRef => exec::elem_drop::<UnguardedFuncRef>,
+        RefType::ExternRef => exec::elem_drop::<UnguardedExternRef>,
     }
 }
 
