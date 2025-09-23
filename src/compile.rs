@@ -1,15 +1,15 @@
 use {
     crate::{
         aliasable_box::AliasableBox,
+        cast::{ExtendingCast, ExtendingCastFrom, WrappingCast, WrappingCastFrom},
         code,
         code::{
-            BinOpInfo, BlockType, CompiledCode, InstrSlot, InstrVisitor, LoadInfo, MemArg,
-            StoreInfo, UnOpInfo, UncompiledCode,
+            BlockType, CompiledCode, InstrSlot, InstrVisitor, MemArg, UncompiledCode,
         },
         decode::DecodeError,
         downcast::{DowncastRef, DowncastMut},
         exec,
-        exec::{Imm, ReadReg, Reg, Stk, ThreadedInstr, WriteReg},
+        exec::{Imm, ReadReg, ReadFromPtr, Reg, Stk, ThreadedInstr, WriteReg, WriteToPtr},
         extern_ref::{ExternRef, UnguardedExternRef},
         func::{Func, FuncEntity, FuncType},
         func_ref::{FuncRef, UnguardedFuncRef},
@@ -150,6 +150,109 @@ struct Compile<'a> {
 }
 
 impl<'a> Compile<'a> {
+    fn compile_load<T>(&mut self, arg: MemArg) -> Result<(), DecodeError>
+    where
+        T: ValTypeOf + ReadFromPtr + WriteReg,
+    {
+        if self.block(0).is_unreachable {
+            return Ok(());
+        }
+        self.compile_load_inner(
+            arg,
+            select_load::<T>(self.opd(0).kind()),
+            T::val_type_of(),
+        )
+    }
+
+    fn compile_load_n<Dst, Src>(&mut self, arg: MemArg) -> Result<(), DecodeError>
+    where
+        Dst: ValTypeOf + ExtendingCastFrom<Src> + WriteReg,
+        Src: ReadFromPtr + ExtendingCast,
+    {
+        if self.block(0).is_unreachable {
+            return Ok(());
+        }
+        self.compile_load_inner(
+            arg,
+            select_load_n::<Dst, Src>(self.opd(0).kind()),
+            Dst::val_type_of(),
+        )
+    }
+
+    fn compile_load_inner(&mut self, arg: MemArg, load: ThreadedInstr, output_type: ValType) -> Result<(), DecodeError> {
+        // Loads write their output to a register, so we need to ensure that the output register is
+        // available for the load to use.
+        //
+        // If the output register is already occupied, then we need to preserve the register on the
+        // stack. Otherwise, the load will overwrite the register while it's already occupied.
+        //
+        // The only exception is if the input occupies the output register. In that case, the
+        // operation can safely overwrite the register, since the input will be consumed by the
+        // operation anyway.
+        let output_reg_idx = output_type.reg_idx();
+        if self.is_reg_occupied(output_reg_idx) && !self.opd(0).occupies_reg(output_reg_idx) {
+            self.preserve_reg(output_reg_idx);
+        }
+
+        // Emit the instruction.
+        self.emit(load);
+
+        // Emit and pop the inputs from the stack.
+        self.emit_opd(0);
+        self.pop_opd();
+
+        // Push the output onto the stack and allocate a register for it.
+        self.push_opd(output_type);
+        self.alloc_reg();
+
+        self.emit(arg.offset);
+
+        Ok(())
+    }
+
+    fn compile_store<T>(&mut self, arg: MemArg) -> Result<(), DecodeError>
+    where
+        T: ReadReg + WriteToPtr,
+    {
+        if self.block(0).is_unreachable {
+            return Ok(());
+        }
+        self.compile_store_inner(
+            arg,
+            select_store::<T>(self.opd(1).kind(), self.opd(0).kind()),
+        )
+    }
+
+    fn compile_store_n<Src, Dst>(&mut self, arg: MemArg) -> Result<(), DecodeError>
+    where
+        Src: ReadReg + WrappingCast,
+        Dst: WrappingCastFrom<Src> + WriteToPtr,
+    {
+        if self.block(0).is_unreachable {
+            return Ok(());
+        }
+        self.compile_store_inner(
+            arg,
+            select_store_n::<Src, Dst>(self.opd(1).kind(), self.opd(0).kind()),
+        )
+    }
+
+    fn compile_store_inner(&mut self, arg: MemArg, store: ThreadedInstr) -> Result<(), DecodeError> {
+        // Emit the instruction.
+        self.emit(store);
+
+        // Emit the inputs and pop them from the stack.
+        self.emit_opd(0);
+        self.pop_opd();
+        self.emit_opd(0);
+        self.pop_opd();
+
+        // Emit the static offset.
+        self.emit(arg.offset);
+        
+        Ok(())
+    }
+
     fn compile_un_op<T, U>(&mut self) -> Result<(), DecodeError>
     where
         T: ReadReg,
@@ -187,8 +290,7 @@ impl<'a> Compile<'a> {
         self.emit_opd(0);
         self.pop_opd();
 
-        // If the operation has an output, push the output onto the stack and allocate a register
-        // for it.
+        // Push the output onto the stack and allocate a register for it.
         self.push_opd(output_type);
         self.alloc_reg();
 
@@ -1765,40 +1867,96 @@ impl<'a> InstrVisitor for Compile<'a> {
 
     // Memory instructions
 
-    /// Compiles a load instruction.
-    fn visit_load(&mut self, arg: MemArg, info: LoadInfo) -> Result<(), DecodeError> {
-        // Skip this instruction if it is unreachable.
-        if self.block(0).is_unreachable {
-            return Ok(());
-        }
-
-        // We compile load instructions by delegating to the code for compiling unary operations.
-        // This works because load instructions are essentially unary operations with an extra
-        // immediate operand.
-        self.visit_un_op(info.op)?;
-
-        // Emit the static offset.
-        self.emit(arg.offset);
-
-        Ok(())
+    fn visit_i32_load(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_load::<i32>(arg)
     }
 
-    /// Compiles a store instruction.
-    fn visit_store(&mut self, arg: MemArg, info: StoreInfo) -> Result<(), DecodeError> {
-        // Skip this instruction if it is unreachable.
-        if self.block(0).is_unreachable {
-            return Ok(());
-        }
+    fn visit_i64_load(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_load::<i64>(arg)
+    }
 
-        // We compile store instructions by delegating to the code for compiling binary operations.
-        // This works because store instructions are essentially binary operations with an extra
-        // immediate operand.
-        self.visit_bin_op(info.op)?;
+    fn visit_f32_load(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_load::<f32>(arg)
+    }
 
-        // Emit the static offset.
-        self.emit(arg.offset);
+    fn visit_f64_load(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_load::<f64>(arg)
+    }
 
-        Ok(())
+    fn visit_i32_load8_s(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_load_n::<i32, i8>(arg)
+    }
+
+    fn visit_i32_load8_u(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_load_n::<u32, u8>(arg)
+    }
+
+    fn visit_i32_load16_s(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_load_n::<i32, i16>(arg)
+    }
+
+    fn visit_i32_load16_u(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_load_n::<u32, u16>(arg)
+    }
+
+    fn visit_i64_load8_s(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_load_n::<i64, i8>(arg)
+    }
+
+    fn visit_i64_load8_u(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_load_n::<u64, u8>(arg)
+    }
+
+    fn visit_i64_load16_s(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_load_n::<i64, i16>(arg)
+    }
+
+    fn visit_i64_load16_u(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_load_n::<u64, u16>(arg)
+    }
+
+    fn visit_i64_load32_s(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_load_n::<i64, i32>(arg)
+    }
+
+    fn visit_i64_load32_u(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_load_n::<u64, u32>(arg)
+    }
+
+    fn visit_i32_store(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_store::<i32>(arg)
+    }
+
+    fn visit_i64_store(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_store::<i64>(arg)
+    }
+
+    fn visit_f32_store(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_store::<f32>(arg)
+    }
+
+    fn visit_f64_store(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_store::<f64>(arg)
+    }
+
+    fn visit_i32_store8(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_store_n::<i32, i8>(arg)
+    }
+
+    fn visit_i32_store16(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_store_n::<i32, i16>(arg)
+    }
+
+    fn visit_i64_store8(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_store_n::<i64, i8>(arg)
+    }
+
+    fn visit_i64_store16(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_store_n::<i64, i16>(arg)
+    }
+
+    fn visit_i64_store32(&mut self, arg: MemArg) -> Result<(), DecodeError> {
+        self.compile_store_n::<i64, i32>(arg)
     }
 
     /// Compiles a `memory.fill` instruction.
@@ -2048,72 +2206,6 @@ impl<'a> InstrVisitor for Compile<'a> {
         // Setting its value will mark the operand as a constant.
         self.push_opd(ValType::F64);
         self.opd_mut(0).val = Some(UnguardedVal::F64(val));
-
-        Ok(())
-    }
-
-    /// Compiles a unary operation.
-    fn visit_un_op(&mut self, info: UnOpInfo) -> Result<(), DecodeError> {
-        // Skip this instruction if it is unreachable.
-        if self.block(0).is_unreachable {
-            return Ok(());
-        }
-
-        // Not all unary operation have an _i variant.
-        //
-        // For instance, the following sequence of instructions:
-        //
-        // i32.const 21
-        // i32.neg
-        //
-        // will likely be constant folded by most Wasm compilers, so we expect it to occur very
-        // rarely in real Wasm code. Therefore, we do not implement an i32_neg_i instruction.
-        //
-        // Conversely, the following sequence of instructions:
-        // i32.const 1
-        // i32.load
-        //
-        // cannot be constant folded, since i32.load has side effects. Therefore, we do implement
-        // an i32_load_i instruction.
-        //
-        // However, sequences like the first one above are still valid Wasm code, so we need to
-        // handle them. If the operation does not have an _i variant, we ensure that the operand is
-        // not an immediate operand, so that we can use the _s variant instead (which is always
-        // available).
-        if info.instr_i.is_none() {
-            self.ensure_opd_not_imm(0);
-        }
-
-        // Unary operations write their output to a register, so we need to ensure that the output
-        // register is available for the operation to use.
-        //
-        // If this operation has an output, and the output register is already occupied, then we
-        // need to preserve the register on the stack. Otherwise, the operation will overwrite the
-        // register while it's already occupied.
-        //
-        // The only exception is if the input occupies the output register. In that case, the
-        // operation can safely overwrite the register, since the input will be consumed by the
-        // operation anyway.
-        if let Some(output_type) = info.output_type {
-            let output_reg_idx = output_type.reg_idx();
-            if self.is_reg_occupied(output_reg_idx) && !self.opd(0).occupies_reg(output_reg_idx) {
-                self.preserve_reg(output_reg_idx);
-            }
-        }
-
-        // Emit the instruction.
-        self.emit(select_un_op_from_info(info, self.opd(0).kind()));
-
-        // Emit and pop the inputs from the stack.
-        self.emit_opd(0);
-        self.pop_opd();
-
-        // If the operation has an output, push the output onto the stack and allocate a register
-        // for it.
-        if let Some(output_type) = info.output_type {
-            self.push_opd(output_type);
-            self.alloc_reg();
-        }
 
         Ok(())
     }
@@ -2661,78 +2753,6 @@ impl<'a> InstrVisitor for Compile<'a> {
     fn visit_i64_trunc_sat_f64_u(&mut self) -> Result<(), Self::Error> {
         self.compile_un_op::<f64, TruncSatTo<u64>>()
     }
-
-    /// Compiles a binary operation
-    fn visit_bin_op(&mut self, info: BinOpInfo) -> Result<(), DecodeError> {
-        // Skip this instruction if it is unreachable.
-        if self.block(0).is_unreachable {
-            return Ok(());
-        }
-
-        // Not all binary operations have an _ii variant.
-        //
-        // For instance, the following sequence of instructions:
-        // i32.const 1
-        // i32.const 2
-        // i32.add
-        //
-        // will likely be constant folded by most Wasm compilers, so we expect it to occur very
-        // rarely in real Wasm code. Therefore, we do not implement an i32_add_ii instruction.
-        //
-        // Conversely, the following sequence of instructions:
-        // i32.const 1
-        // i32.const 2
-        // i32.store
-        //
-        // cannot be constant folded, since i32.store has side effects. Therefore, we do implement
-        // an i32_store_ii instruction.
-        //
-        // However, sequences like the first one above are still valid Wasm code, so we need to
-        // handle them. If the first operand is an immediate operand, and the operation does not
-        // have an _ii variant, we ensure that the second operand is not an immediate operand, so
-        // that we can use the _is variant instead (which is always available).
-        if self.opd(1).is_imm() && info.instr_ii.is_none() {
-            self.ensure_opd_not_imm(0);
-        }
-
-        // Binary operations write their output to a register, so we need to ensure that the output
-        // register is available for the operation to use.
-        //
-        // If this operation has an output, and the output register is already occupied, then we
-        // need to preserve the register on the stack. Otherwise, the operation will the register
-        // while it's already occupied.
-        //
-        // The only exception is if one of the inputs occupies the output register. In that case,
-        // the operation can safely overwrite the register, since the input will be consumed by the
-        // operation anyway.
-        if let Some(output_type) = info.output_type {
-            let output_reg_idx = output_type.reg_idx();
-            if self.is_reg_occupied(output_reg_idx)
-                && !self.opd(1).occupies_reg(output_reg_idx)
-                && !self.opd(0).occupies_reg(output_reg_idx)
-            {
-                self.preserve_reg(output_reg_idx);
-            }
-        }
-
-        // Emit the instruction.
-        self.emit(select_bin_op_from_info(info, self.opd(1).kind(), self.opd(0).kind()));
-
-        // Emit the inputs and pop them from the stack.
-        self.emit_opd(0);
-        self.pop_opd();
-        self.emit_opd(0);
-        self.pop_opd();
-
-        // If the operation has an output, push the output onto the stack and allocate a register
-        // for it.
-        if let Some(output_type) = info.output_type {
-            self.push_opd(output_type);
-            self.alloc_reg();
-        }
-
-        Ok(())
-    }
 }
 
 /// A local on the stack.
@@ -3126,6 +3146,64 @@ fn select_elem_drop(type_: RefType) -> ThreadedInstr {
     }
 }
 
+fn select_load<T>(input: OpdKind) -> ThreadedInstr
+where
+    T: ReadFromPtr + WriteReg
+{
+    match input {
+        OpdKind::Imm => exec::load::<T, Imm, Reg>,
+        OpdKind::Stk => exec::load::<T, Stk, Reg>,
+        OpdKind::Reg => exec::load::<T, Reg, Reg>,
+    }
+}
+
+fn select_load_n<Dst, Src>(input: OpdKind) -> ThreadedInstr
+where
+    Dst: ExtendingCastFrom<Src> + WriteReg,
+    Src: ReadFromPtr + ExtendingCast,
+{
+    match input {
+        OpdKind::Imm => exec::load_n::<Dst, Src, Imm, Reg>,
+        OpdKind::Stk => exec::load_n::<Dst, Src, Stk, Reg>,
+        OpdKind::Reg => exec::load_n::<Dst, Src, Reg, Reg>,
+    }
+}
+
+fn select_store<T>(input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr
+where
+    T: ReadReg + WriteToPtr
+{
+    match (input_0, input_1) {
+        (OpdKind::Imm, OpdKind::Imm) => exec::store::<T, Imm, Imm>,
+        (OpdKind::Stk, OpdKind::Imm) => exec::store::<T, Stk, Imm>,
+        (OpdKind::Reg, OpdKind::Imm) => exec::store::<T, Reg, Imm>,
+        (OpdKind::Imm, OpdKind::Stk) => exec::store::<T, Imm, Stk>,
+        (OpdKind::Stk, OpdKind::Stk) => exec::store::<T, Stk, Stk>,
+        (OpdKind::Reg, OpdKind::Stk) => exec::store::<T, Reg, Stk>,
+        (OpdKind::Imm, OpdKind::Reg) => exec::store::<T, Imm, Reg>,
+        (OpdKind::Stk, OpdKind::Reg) => exec::store::<T, Stk, Reg>,
+        (OpdKind::Reg, OpdKind::Reg) => exec::store::<T, Reg, Reg>,
+    }
+}
+
+fn select_store_n<Src, Dst>(input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr
+where
+    Src: ReadReg + WrappingCast,
+    Dst: WrappingCastFrom<Src> + WriteToPtr,
+{
+    match (input_0, input_1) {
+        (OpdKind::Imm, OpdKind::Imm) => exec::store_n::<Src, Dst, Imm, Imm>,
+        (OpdKind::Stk, OpdKind::Imm) => exec::store_n::<Src, Dst, Stk, Imm>,
+        (OpdKind::Reg, OpdKind::Imm) => exec::store_n::<Src, Dst, Reg, Imm>,
+        (OpdKind::Imm, OpdKind::Stk) => exec::store_n::<Src, Dst, Imm, Stk>,
+        (OpdKind::Stk, OpdKind::Stk) => exec::store_n::<Src, Dst, Stk, Stk>,
+        (OpdKind::Reg, OpdKind::Stk) => exec::store_n::<Src, Dst, Reg, Stk>,
+        (OpdKind::Imm, OpdKind::Reg) => exec::store_n::<Src, Dst, Imm, Reg>,
+        (OpdKind::Stk, OpdKind::Reg) => exec::store_n::<Src, Dst, Stk, Reg>,
+        (OpdKind::Reg, OpdKind::Reg) => exec::store_n::<Src, Dst, Reg, Reg>,
+    }
+}
+
 fn select_un_op<T, U>(input: OpdKind) -> ThreadedInstr
 where
     T: ReadReg,
@@ -3156,30 +3234,6 @@ where
         (OpdKind::Stk, OpdKind::Reg) => exec::bin_op::<T, B, Stk, Reg, Reg>,
         (OpdKind::Reg, OpdKind::Reg) => exec::bin_op::<T, B, Reg, Reg, Reg>,
     }
-}
-
-fn select_un_op_from_info(info: UnOpInfo, kind: OpdKind) -> ThreadedInstr {
-    match kind {
-        OpdKind::Stk => Some(info.instr_s),
-        OpdKind::Reg => Some(info.instr_r),
-        OpdKind::Imm => info.instr_i,
-    }
-    .expect("no suitable instruction found")
-}
-
-fn select_bin_op_from_info(info: BinOpInfo, kind_0: OpdKind, kind_1: OpdKind) -> ThreadedInstr {
-    match (kind_0, kind_1) {
-        (OpdKind::Stk, OpdKind::Stk) => Some(info.instr_ss),
-        (OpdKind::Reg, OpdKind::Stk) => Some(info.instr_rs),
-        (OpdKind::Imm, OpdKind::Stk) => Some(info.instr_is),
-        (OpdKind::Stk, OpdKind::Reg) => Some(info.instr_sr),
-        (OpdKind::Reg, OpdKind::Reg) => info.instr_rr,
-        (OpdKind::Imm, OpdKind::Reg) => Some(info.instr_ir),
-        (OpdKind::Stk, OpdKind::Imm) => Some(info.instr_si),
-        (OpdKind::Reg, OpdKind::Imm) => Some(info.instr_ri),
-        (OpdKind::Imm, OpdKind::Imm) => info.instr_ii,
-    }
-    .expect("no suitable instruction found")
 }
 
 fn selecy_copy_opd_to_stack(type_: ValType, kind: OpdKind) -> ThreadedInstr {

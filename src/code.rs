@@ -2,7 +2,6 @@ use {
     crate::{
         aliasable_box::AliasableBox,
         decode::{Decode, DecodeError, Decoder},
-        exec::{self, Imm, Reg, Stk, ThreadedInstr},
         ref_::RefType,
         val::ValType,
     },
@@ -106,8 +105,29 @@ pub(crate) trait InstrVisitor {
     fn visit_elem_drop(&mut self, elem_idx: u32) -> Result<(), Self::Error>;
 
     // Memory instructions
-    fn visit_load(&mut self, arg: MemArg, info: LoadInfo) -> Result<(), Self::Error>;
-    fn visit_store(&mut self, arg: MemArg, info: StoreInfo) -> Result<(), Self::Error>;
+    fn visit_i32_load(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i64_load(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_f32_load(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_f64_load(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i32_load8_s(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i32_load8_u(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i32_load16_s(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i32_load16_u(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i64_load8_s(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i64_load8_u(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i64_load16_s(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i64_load16_u(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i64_load32_s(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i64_load32_u(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i32_store(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i64_store(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_f32_store(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_f64_store(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i32_store8(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i32_store16(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i64_store8(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i64_store16(&mut self, arg: MemArg) -> Result<(), Self::Error>;
+    fn visit_i64_store32(&mut self, arg: MemArg) -> Result<(), Self::Error>;
     fn visit_memory_size(&mut self) -> Result<(), Self::Error>;
     fn visit_memory_grow(&mut self) -> Result<(), Self::Error>;
     fn visit_memory_fill(&mut self) -> Result<(), Self::Error>;
@@ -267,9 +287,6 @@ pub(crate) trait InstrVisitor {
     fn visit_i64_trunc_sat_f32_u(&mut self) -> Result<(), Self::Error>;
     fn visit_i64_trunc_sat_f64_s(&mut self) -> Result<(), Self::Error>;
     fn visit_i64_trunc_sat_f64_u(&mut self) -> Result<(), Self::Error>;
-
-    fn visit_un_op(&mut self, info: UnOpInfo) -> Result<(), Self::Error>;
-    fn visit_bin_op(&mut self, info: BinOpInfo) -> Result<(), Self::Error>;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -339,45 +356,6 @@ impl Decode for MemArg {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct LoadInfo {
-    pub(crate) max_align: u32,
-    pub(crate) op: UnOpInfo,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct StoreInfo {
-    pub(crate) max_align: u32,
-    pub(crate) op: BinOpInfo,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct UnOpInfo {
-    pub(crate) _name: &'static str,
-    pub(crate) input_type: ValType,
-    pub(crate) output_type: Option<ValType>,
-    pub(crate) instr_s: ThreadedInstr,
-    pub(crate) instr_r: ThreadedInstr,
-    pub(crate) instr_i: Option<ThreadedInstr>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct BinOpInfo {
-    pub(crate) _name: &'static str,
-    pub(crate) input_type_0: ValType,
-    pub(crate) input_type_1: ValType,
-    pub(crate) output_type: Option<ValType>,
-    pub(crate) instr_ss: ThreadedInstr,
-    pub(crate) instr_rs: ThreadedInstr,
-    pub(crate) instr_is: ThreadedInstr,
-    pub(crate) instr_ir: ThreadedInstr,
-    pub(crate) instr_ii: Option<ThreadedInstr>,
-    pub(crate) instr_sr: ThreadedInstr,
-    pub(crate) instr_si: ThreadedInstr,
-    pub(crate) instr_ri: ThreadedInstr,
-    pub(crate) instr_rr: Option<ThreadedInstr>,
-}
-
 pub(crate) fn decode_instr<V>(
     decoder: &mut Decoder<'_>,
     label_idxs: &mut Vec<u32>,
@@ -428,391 +406,29 @@ where
         0x24 => visitor.visit_global_set(decoder.decode()?),
         0x25 => visitor.visit_table_get(decoder.decode()?),
         0x26 => visitor.visit_table_set(decoder.decode()?),
-        0x28 => visitor.visit_load(
-            decoder.decode()?,
-            LoadInfo {
-                max_align: 2,
-                op: UnOpInfo {
-                    _name: "i32_load",
-                    input_type: ValType::I32,
-                    output_type: Some(ValType::I32),
-                    instr_s: exec::load::<i32, Stk, Reg>,
-                    instr_r: exec::load::<i32, Reg, Reg>,
-                    instr_i: Some(exec::load::<i32, Imm, Reg>),
-                },
-            },
-        ),
-        0x29 => visitor.visit_load(
-            decoder.decode()?,
-            LoadInfo {
-                max_align: 3,
-                op: UnOpInfo {
-                    _name: "i64_load",
-                    input_type: ValType::I32,
-                    output_type: Some(ValType::I64),
-                    instr_s: exec::load::<i64, Stk, Reg>,
-                    instr_r: exec::load::<i64, Reg, Reg>,
-                    instr_i: Some(exec::load::<i64, Imm, Reg>),
-                },
-            },
-        ),
-        0x2A => visitor.visit_load(
-            decoder.decode()?,
-            LoadInfo {
-                max_align: 2,
-                op: UnOpInfo {
-                    _name: "f32_load",
-                    input_type: ValType::I32,
-                    output_type: Some(ValType::F32),
-                    instr_s: exec::load::<f32, Stk, Reg>,
-                    instr_r: exec::load::<f32, Reg, Reg>,
-                    instr_i: Some(exec::load::<f32, Imm, Reg>),
-                },
-            },
-        ),
-        0x2B => visitor.visit_load(
-            decoder.decode()?,
-            LoadInfo {
-                max_align: 3,
-                op: UnOpInfo {
-                    _name: "f64_load",
-                    input_type: ValType::I32,
-                    output_type: Some(ValType::F64),
-                    instr_s: exec::load::<f64, Stk, Reg>,
-                    instr_r: exec::load::<f64, Reg, Reg>,
-                    instr_i: Some(exec::load::<f64, Imm, Reg>),
-                },
-            },
-        ),
-        0x2C => visitor.visit_load(
-            decoder.decode()?,
-            LoadInfo {
-                max_align: 0,
-                op: UnOpInfo {
-                    _name: "i32_load8_s",
-                    input_type: ValType::I32,
-                    output_type: Some(ValType::I32),
-                    instr_s: exec::load_n::<i32, i8, Stk, Reg>,
-                    instr_r: exec::load_n::<i32, i8, Reg, Reg>,
-                    instr_i: Some(exec::load_n::<i32, i8, Imm, Reg>),
-                },
-            },
-        ),
-        0x2D => visitor.visit_load(
-            decoder.decode()?,
-            LoadInfo {
-                max_align: 0,
-                op: UnOpInfo {
-                    _name: "i32_load8_u",
-                    input_type: ValType::I32,
-                    output_type: Some(ValType::I32),
-                    instr_s: exec::load_n::<u32, u8, Stk, Reg>,
-                    instr_r: exec::load_n::<u32, u8, Reg, Reg>,
-                    instr_i: Some(exec::load_n::<u32, u8, Imm, Reg>),
-                },
-            },
-        ),
-        0x2E => visitor.visit_load(
-            decoder.decode()?,
-            LoadInfo {
-                max_align: 1,
-                op: UnOpInfo {
-                    _name: "i32_load16_s",
-                    input_type: ValType::I32,
-                    output_type: Some(ValType::I32),
-                    instr_s: exec::load_n::<i32, i16, Stk, Reg>,
-                    instr_r: exec::load_n::<i32, i16, Reg, Reg>,
-                    instr_i: Some(exec::load_n::<i32, i16, Imm, Reg>),
-                },
-            },
-        ),
-        0x2F => visitor.visit_load(
-            decoder.decode()?,
-            LoadInfo {
-                max_align: 1,
-                op: UnOpInfo {
-                    _name: "i32_load16_u",
-                    input_type: ValType::I32,
-                    output_type: Some(ValType::I32),
-                    instr_s: exec::load_n::<u32, u16, Stk, Reg>,
-                    instr_r: exec::load_n::<u32, u16, Reg, Reg>,
-                    instr_i: Some(exec::load_n::<u32, u16, Imm, Reg>),
-                },
-            },
-        ),
-        0x30 => visitor.visit_load(
-            decoder.decode()?,
-            LoadInfo {
-                max_align: 0,
-                op: UnOpInfo {
-                    _name: "i64_load8_s",
-                    input_type: ValType::I32,
-                    output_type: Some(ValType::I64),
-                    instr_s: exec::load_n::<i64, i8, Stk, Reg>,
-                    instr_r: exec::load_n::<i64, i8, Reg, Reg>,
-                    instr_i: Some(exec::load_n::<i64, i8, Imm, Reg>),
-                },
-            },
-        ),
-        0x31 => visitor.visit_load(
-            decoder.decode()?,
-            LoadInfo {
-                max_align: 0,
-                op: UnOpInfo {
-                    _name: "i64_load8_u",
-                    input_type: ValType::I32,
-                    output_type: Some(ValType::I64),
-                    instr_s: exec::load_n::<u64, u8, Stk, Reg>,
-                    instr_r: exec::load_n::<u64, u8, Reg, Reg>,
-                    instr_i: Some(exec::load_n::<u64, u8, Imm, Reg>),
-                },
-            },
-        ),
-        0x32 => visitor.visit_load(
-            decoder.decode()?,
-            LoadInfo {
-                max_align: 1,
-                op: UnOpInfo {
-                    _name: "i64_load16_s",
-                    input_type: ValType::I32,
-                    output_type: Some(ValType::I64),
-                    instr_s: exec::load_n::<i64, i16, Stk, Reg>,
-                    instr_r: exec::load_n::<i64, i16, Reg, Reg>,
-                    instr_i: Some(exec::load_n::<i64, i16, Imm, Reg>),
-                },
-            },
-        ),
-        0x33 => visitor.visit_load(
-            decoder.decode()?,
-            LoadInfo {
-                max_align: 1,
-                op: UnOpInfo {
-                    _name: "i64_load16_u",
-                    input_type: ValType::I32,
-                    output_type: Some(ValType::I64),
-                    instr_s: exec::load_n::<u64, u16, Stk, Reg>,
-                    instr_r: exec::load_n::<u64, u16, Reg, Reg>,
-                    instr_i: Some(exec::load_n::<u64, u16, Imm, Reg>),
-                },
-            },
-        ),
-        0x34 => visitor.visit_load(
-            decoder.decode()?,
-            LoadInfo {
-                max_align: 2,
-                op: UnOpInfo {
-                    _name: "i64_load32_s",
-                    input_type: ValType::I32,
-                    output_type: Some(ValType::I64),
-                    instr_s: exec::load_n::<i64, i32, Stk, Reg>,
-                    instr_r: exec::load_n::<i64, i32, Reg, Reg>,
-                    instr_i: Some(exec::load_n::<i64, i32, Imm, Reg>),
-                },
-            },
-        ),
-        0x35 => visitor.visit_load(
-            decoder.decode()?,
-            LoadInfo {
-                max_align: 2,
-                op: UnOpInfo {
-                    _name: "i64_load32_u",
-                    input_type: ValType::I32,
-                    output_type: Some(ValType::I64),
-                    instr_s: exec::load_n::<u64, u32, Stk, Reg>,
-                    instr_r: exec::load_n::<u64, u32, Reg, Reg>,
-                    instr_i: Some(exec::load_n::<u64, u32, Imm, Reg>),
-                },
-            },
-        ),
-        0x36 => visitor.visit_store(
-            decoder.decode()?,
-            StoreInfo {
-                max_align: 2,
-                op: BinOpInfo {
-                    _name: "i32_store",
-                    input_type_0: ValType::I32,
-                    input_type_1: ValType::I32,
-                    output_type: None,
-                    instr_ss: exec::store::<i32, Stk, Stk>,
-                    instr_rs: exec::store::<i32, Reg, Stk>,
-                    instr_is: exec::store::<i32, Imm, Stk>,
-                    instr_ir: exec::store::<i32, Imm, Reg>,
-                    instr_ii: Some(exec::store::<i32, Imm, Imm>),
-                    instr_sr: exec::store::<i32, Stk, Reg>,
-                    instr_si: exec::store::<i32, Stk, Imm>,
-                    instr_ri: exec::store::<i32, Reg, Imm>,
-                    instr_rr: None,
-                },
-            },
-        ),
-        0x37 => visitor.visit_store(
-            decoder.decode()?,
-            StoreInfo {
-                max_align: 3,
-                op: BinOpInfo {
-                    _name: "i64_store",
-                    input_type_0: ValType::I32,
-                    input_type_1: ValType::I64,
-                    output_type: None,
-                    instr_ss: exec::store::<i64, Stk, Stk>,
-                    instr_rs: exec::store::<i64, Reg, Stk>,
-                    instr_is: exec::store::<i64, Imm, Stk>,
-                    instr_ir: exec::store::<i64, Imm, Reg>,
-                    instr_ii: Some(exec::store::<i64, Imm, Imm>),
-                    instr_sr: exec::store::<i64, Stk, Reg>,
-                    instr_si: exec::store::<i64, Stk, Imm>,
-                    instr_ri: exec::store::<i64, Reg, Imm>,
-                    instr_rr: None,
-                },
-            },
-        ),
-        0x38 => visitor.visit_store(
-            decoder.decode()?,
-            StoreInfo {
-                max_align: 2,
-                op: BinOpInfo {
-                    _name: "f32_store",
-                    input_type_0: ValType::I32,
-                    input_type_1: ValType::F32,
-                    output_type: None,
-                    instr_ss: exec::store::<f32, Stk, Stk>,
-                    instr_rs: exec::store::<f32, Reg, Stk>,
-                    instr_is: exec::store::<f32, Imm, Stk>,
-                    instr_ir: exec::store::<f32, Imm, Reg>,
-                    instr_ii: Some(exec::store::<f32, Imm, Imm>),
-                    instr_sr: exec::store::<f32, Stk, Reg>,
-                    instr_si: exec::store::<f32, Stk, Imm>,
-                    instr_ri: exec::store::<f32, Reg, Imm>,
-                    instr_rr: Some(exec::store::<f32, Reg, Reg>),
-                },
-            },
-        ),
-        0x39 => visitor.visit_store(
-            decoder.decode()?,
-            StoreInfo {
-                max_align: 3,
-                op: BinOpInfo {
-                    _name: "f64_store",
-                    input_type_0: ValType::I32,
-                    input_type_1: ValType::F64,
-                    output_type: None,
-                    instr_ss: exec::store::<f64, Stk, Stk>,
-                    instr_rs: exec::store::<f64, Reg, Stk>,
-                    instr_is: exec::store::<f64, Imm, Stk>,
-                    instr_ir: exec::store::<f64, Imm, Reg>,
-                    instr_ii: Some(exec::store::<f64, Imm, Imm>),
-                    instr_sr: exec::store::<f64, Stk, Reg>,
-                    instr_si: exec::store::<f64, Stk, Imm>,
-                    instr_ri: exec::store::<f64, Reg, Imm>,
-                    instr_rr: Some(exec::store::<f64, Reg, Reg>),
-                },
-            },
-        ),
-        0x3A => visitor.visit_store(
-            decoder.decode()?,
-            StoreInfo {
-                max_align: 0,
-                op: BinOpInfo {
-                    _name: "i32_store8",
-                    input_type_0: ValType::I32,
-                    input_type_1: ValType::I32,
-                    output_type: None,
-                    instr_ss: exec::store_n::<i32, i8, Stk, Stk>,
-                    instr_rs: exec::store_n::<i32, i8, Reg, Stk>,
-                    instr_is: exec::store_n::<i32, i8, Imm, Stk>,
-                    instr_ir: exec::store_n::<i32, i8, Imm, Reg>,
-                    instr_ii: Some(exec::store_n::<i32, i8, Imm, Imm>),
-                    instr_sr: exec::store_n::<i32, i8, Stk, Reg>,
-                    instr_si: exec::store_n::<i32, i8, Stk, Imm>,
-                    instr_ri: exec::store_n::<i32, i8, Reg, Imm>,
-                    instr_rr: None,
-                },
-            },
-        ),
-        0x3B => visitor.visit_store(
-            decoder.decode()?,
-            StoreInfo {
-                max_align: 1,
-                op: BinOpInfo {
-                    _name: "i32_store16",
-                    input_type_0: ValType::I32,
-                    input_type_1: ValType::I32,
-                    output_type: None,
-                    instr_ss: exec::store_n::<i32, i16, Stk, Stk>,
-                    instr_rs: exec::store_n::<i32, i16, Reg, Stk>,
-                    instr_is: exec::store_n::<i32, i16, Imm, Stk>,
-                    instr_ir: exec::store_n::<i32, i16, Imm, Reg>,
-                    instr_ii: Some(exec::store_n::<i32, i16, Imm, Imm>),
-                    instr_sr: exec::store_n::<i32, i16, Stk, Reg>,
-                    instr_si: exec::store_n::<i32, i16, Stk, Imm>,
-                    instr_ri: exec::store_n::<i32, i16, Reg, Imm>,
-                    instr_rr: None,
-                },
-            },
-        ),
-        0x3C => visitor.visit_store(
-            decoder.decode()?,
-            StoreInfo {
-                max_align: 0,
-                op: BinOpInfo {
-                    _name: "i64_store8",
-                    input_type_0: ValType::I32,
-                    input_type_1: ValType::I64,
-                    output_type: None,
-                    instr_ss: exec::store_n::<i64, i8, Stk, Stk>,
-                    instr_rs: exec::store_n::<i64, i8, Reg, Stk>,
-                    instr_is: exec::store_n::<i64, i8, Imm, Stk>,
-                    instr_ir: exec::store_n::<i64, i8, Imm, Reg>,
-                    instr_ii: Some(exec::store_n::<i64, i8, Imm, Imm>),
-                    instr_sr: exec::store_n::<i64, i8, Stk, Reg>,
-                    instr_si: exec::store_n::<i64, i8, Stk, Imm>,
-                    instr_ri: exec::store_n::<i64, i8, Reg, Imm>,
-                    instr_rr: None,
-                },
-            },
-        ),
-        0x3D => visitor.visit_store(
-            decoder.decode()?,
-            StoreInfo {
-                max_align: 1,
-                op: BinOpInfo {
-                    _name: "i64_store16",
-                    input_type_0: ValType::I32,
-                    input_type_1: ValType::I64,
-                    output_type: None,
-                    instr_ss: exec::store_n::<i64, i16, Stk, Stk>,
-                    instr_rs: exec::store_n::<i64, i16, Reg, Stk>,
-                    instr_is: exec::store_n::<i64, i16, Imm, Stk>,
-                    instr_ir: exec::store_n::<i64, i16, Imm, Reg>,
-                    instr_ii: Some(exec::store_n::<i64, i16, Imm, Imm>),
-                    instr_sr: exec::store_n::<i64, i16, Stk, Reg>,
-                    instr_si: exec::store_n::<i64, i16, Stk, Imm>,
-                    instr_ri: exec::store_n::<i64, i16, Reg, Imm>,
-                    instr_rr: None,
-                },
-            },
-        ),
-        0x3E => visitor.visit_store(
-            decoder.decode()?,
-            StoreInfo {
-                max_align: 2,
-                op: BinOpInfo {
-                    _name: "i64_store32",
-                    input_type_0: ValType::I32,
-                    input_type_1: ValType::I64,
-                    output_type: None,
-                    instr_ss: exec::store_n::<i64, i32, Stk, Stk>,
-                    instr_rs: exec::store_n::<i64, i32, Reg, Stk>,
-                    instr_is: exec::store_n::<i64, i32, Imm, Stk>,
-                    instr_ir: exec::store_n::<i64, i32, Imm, Reg>,
-                    instr_ii: Some(exec::store_n::<i64, i32, Imm, Imm>),
-                    instr_sr: exec::store_n::<i64, i32, Stk, Reg>,
-                    instr_si: exec::store_n::<i64, i32, Stk, Imm>,
-                    instr_ri: exec::store_n::<i64, i32, Reg, Imm>,
-                    instr_rr: None,
-                },
-            },
-        ),
+        0x28 => visitor.visit_i32_load(decoder.decode()?),
+        0x29 => visitor.visit_i64_load(decoder.decode()?),
+        0x2A => visitor.visit_f32_load(decoder.decode()?),
+        0x2B => visitor.visit_f64_load(decoder.decode()?),
+        0x2C => visitor.visit_i32_load8_s(decoder.decode()?),
+        0x2D => visitor.visit_i32_load8_u(decoder.decode()?),
+        0x2E => visitor.visit_i32_load16_s(decoder.decode()?),
+        0x2F => visitor.visit_i32_load16_u(decoder.decode()?),
+        0x30 => visitor.visit_i64_load8_s(decoder.decode()?),
+        0x31 => visitor.visit_i64_load8_u(decoder.decode()?),
+        0x32 => visitor.visit_i64_load16_s(decoder.decode()?),
+        0x33 => visitor.visit_i64_load16_u(decoder.decode()?),
+        0x34 => visitor.visit_i64_load32_s(decoder.decode()?),
+        0x35 => visitor.visit_i64_load32_u(decoder.decode()?),
+        0x36 => visitor.visit_i32_store(decoder.decode()?),
+        0x37 => visitor.visit_i64_store(decoder.decode()?),
+        0x38 => visitor.visit_f32_store(decoder.decode()?),
+        0x39 => visitor.visit_f64_store(decoder.decode()?),
+        0x3A => visitor.visit_i32_store8(decoder.decode()?),
+        0x3B => visitor.visit_i32_store16(decoder.decode()?),
+        0x3C => visitor.visit_i64_store8(decoder.decode()?),
+        0x3D => visitor.visit_i64_store16(decoder.decode()?),
+        0x3E => visitor.visit_i64_store32(decoder.decode()?),
         0x3F => {
             if decoder.read_byte()? != 0x00 {
                 return Err(DecodeError::new("expected zero byte"))?;

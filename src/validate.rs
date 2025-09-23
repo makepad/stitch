@@ -2,8 +2,7 @@ use {
     crate::{
         code,
         code::{
-            BinOpInfo, BlockType, InstrVisitor, LoadInfo, MemArg, StoreInfo, UnOpInfo,
-            UncompiledCode,
+            BlockType, InstrVisitor, MemArg, UncompiledCode,
         },
         decode::DecodeError,
         func::FuncType,
@@ -85,6 +84,58 @@ struct Validation<'a> {
 }
 
 impl<'a> Validation<'a> {
+    fn validate_load<T>(&mut self, arg: MemArg) -> Result<(), DecodeError>
+    where
+        T: ValTypeOf,
+    {
+        self.validate_load_inner(arg, T::val_type_of(), align_of::<T>().ilog(2))
+    }
+
+    fn validate_load_n<Dst, Src>(&mut self, arg: MemArg) -> Result<(), DecodeError>
+    where
+        Dst: ValTypeOf,
+    {
+        self.validate_load_inner(arg, Dst::val_type_of(), align_of::<Src>().ilog(2))
+    }
+
+    fn validate_load_inner(&mut self, arg: MemArg, output_type: ValType, max_align: u32) -> Result<(), DecodeError> {
+        if arg.align > max_align {
+            return Err(DecodeError::new("alignment too large"));
+        }
+        self.module.memory(0)?;
+        self.pop_opd()?.check(ValType::I32)?;
+        self.push_opd(output_type);
+        Ok(())
+    }
+
+    fn validate_store<T>(&mut self, arg: MemArg) -> Result<(), DecodeError>
+    where
+        T: ValTypeOf,
+    {
+        self.validate_store_inner(arg, T::val_type_of(), align_of::<T>().ilog(2))
+    }
+
+    fn validate_store_n<Src, Dst>(&mut self, arg: MemArg) -> Result<(), DecodeError>
+    where
+        Src: ValTypeOf
+    {
+        self.validate_store_inner(
+            arg,
+            Src::val_type_of(),
+            align_of::<Dst>().ilog(2),
+        )
+    }
+
+    fn validate_store_inner(&mut self, arg: MemArg, input_type: ValType, max_align: u32) -> Result<(), DecodeError> {
+        if arg.align > max_align {
+            return Err(DecodeError::new("alignment too large"));
+        }
+        self.module.memory(0)?;
+        self.pop_opd()?.check(input_type)?;
+        self.pop_opd()?.check(ValType::I32)?;
+        Ok(())
+    }
+
     fn validate_un_op<T, U>(&mut self) -> Result<(), DecodeError>
     where
         T: ValTypeOf,
@@ -106,12 +157,12 @@ impl<'a> Validation<'a> {
         B: BinOp<T>,
         B::Output: ValTypeOf,
     {
-        self.validate_bin_op_inner(T::val_type_of(), B::Output::val_type_of())
+        self.validate_bin_op_inner(T::val_type_of(), T::val_type_of(), B::Output::val_type_of())
     }
 
-    fn validate_bin_op_inner(&mut self, input_type: ValType, output_type: ValType) -> Result<(), DecodeError> {
-        self.pop_opd()?.check(input_type)?;
-        self.pop_opd()?.check(input_type)?;
+    fn validate_bin_op_inner(&mut self, input_type_0: ValType, input_type_1: ValType, output_type: ValType) -> Result<(), DecodeError> {
+        self.pop_opd()?.check(input_type_1)?;
+        self.pop_opd()?.check(input_type_0)?;
         self.push_opd(output_type);
         Ok(())
     }
@@ -497,20 +548,96 @@ impl<'a> InstrVisitor for Validation<'a> {
     }
 
     // Memory instructions
-    fn visit_load(&mut self, arg: MemArg, info: LoadInfo) -> Result<(), Self::Error> {
-        if arg.align > info.max_align {
-            return Err(DecodeError::new("alignment too large"));
-        }
-        self.module.memory(0)?;
-        self.visit_un_op(info.op)
+    fn visit_i32_load(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_load::<i32>(arg)
     }
 
-    fn visit_store(&mut self, arg: MemArg, info: StoreInfo) -> Result<(), Self::Error> {
-        if arg.align > info.max_align {
-            return Err(DecodeError::new("alignment too large"));
-        }
-        self.module.memory(0)?;
-        self.visit_bin_op(info.op)
+    fn visit_i64_load(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_load::<i64>(arg)
+    }
+
+    fn visit_f32_load(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_load::<f32>(arg)
+    }
+
+    fn visit_f64_load(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_load::<f64>(arg)
+    }
+
+    fn visit_i32_load8_s(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_load_n::<i32, i8>(arg)
+    }
+
+    fn visit_i32_load8_u(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_load_n::<u32, u8>(arg)
+    }
+
+    fn visit_i32_load16_s(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_load_n::<i32, i16>(arg)
+    }
+
+    fn visit_i32_load16_u(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_load_n::<u32, u16>(arg)
+    }
+
+    fn visit_i64_load8_s(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_load_n::<i64, i8>(arg)
+    }
+
+    fn visit_i64_load8_u(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_load_n::<u64, u8>(arg)
+    }
+
+    fn visit_i64_load16_s(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_load_n::<i64, i16>(arg)
+    }
+
+    fn visit_i64_load16_u(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_load_n::<u64, u16>(arg)
+    }
+
+    fn visit_i64_load32_s(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_load_n::<i64, i32>(arg)
+    }
+
+    fn visit_i64_load32_u(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_load_n::<u64, u32>(arg)
+    }
+
+    fn visit_i32_store(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_store::<i32>(arg)
+    }
+
+    fn visit_i64_store(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_store::<i64>(arg)
+    }
+
+    fn visit_f32_store(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_store::<f32>(arg)
+    }
+
+    fn visit_f64_store(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_store::<f64>(arg)
+    }
+
+    fn visit_i32_store8(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_store_n::<i32, i8>(arg)
+    }
+
+    fn visit_i32_store16(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_store_n::<i32, i16>(arg)
+    }
+
+    fn visit_i64_store8(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_store_n::<i64, i8>(arg)
+    }
+
+    fn visit_i64_store16(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_store_n::<i64, i16>(arg)
+    }
+
+    fn visit_i64_store32(&mut self, arg: MemArg) -> Result<(), Self::Error> {
+        self.validate_store_n::<i64, i32>(arg)
     }
 
     fn visit_memory_size(&mut self) -> Result<(), Self::Error> {
@@ -1119,23 +1246,6 @@ impl<'a> InstrVisitor for Validation<'a> {
 
     fn visit_i64_trunc_sat_f64_u(&mut self) -> Result<(), Self::Error> {
         self.validate_un_op::<f64, TruncSatTo<u64>>()
-    }
-
-    fn visit_un_op(&mut self, info: UnOpInfo) -> Result<(), Self::Error> {
-        self.pop_opd()?.check(info.input_type)?;
-        if let Some(output_type) = info.output_type {
-            self.push_opd(output_type);
-        }
-        Ok(())
-    }
-
-    fn visit_bin_op(&mut self, info: BinOpInfo) -> Result<(), Self::Error> {
-        self.pop_opd()?.check(info.input_type_1)?;
-        self.pop_opd()?.check(info.input_type_0)?;
-        if let Some(output_type) = info.output_type {
-            self.push_opd(output_type);
-        }
-        Ok(())
     }
 }
 
