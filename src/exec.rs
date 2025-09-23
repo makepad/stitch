@@ -362,7 +362,7 @@ threaded_instr!(unreachable(
     ControlFlow::Trap(Trap::Unreachable).to_bits()
 });
 
-threaded_instr!(br(
+pub(crate) unsafe extern "C" fn br(
     ip: Ip,
     sp: Sp,
     md: Md,
@@ -372,17 +372,15 @@ threaded_instr!(br(
     dx: Dx,
     cx: Cx,
 ) -> ControlFlowBits {
-    // Read operands
-    let target = *ip.cast();
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let target = args.read_imm();
+        args.set_ip(target);
+        args.next()
+    }
+}
 
-    // Branch to target
-    let ip = target;
-
-    // Execute next instruction
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
-
-threaded_instr!(br_if_z_s(
+pub(crate) unsafe extern "C" fn br_if_z<R>(
     ip: Ip,
     sp: Sp,
     md: Md,
@@ -391,19 +389,24 @@ threaded_instr!(br_if_z_s(
     sx: Sx,
     dx: Dx,
     cx: Cx,
-) -> ControlFlowBits {
-    // Read operands
-    let (cond, ip): (u32, _) = read_stack(ip, sp);
-    let (target, ip) = read_imm(ip);
+) -> ControlFlowBits
+where
+    R: Read<i32>
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let cond: i32 = R::read(&mut args);
+        let target = args.read_imm();
+        if cond == 0 {
+            args.set_ip(target);
+            args.next()
+        } else {
+            args.next()
+        }
+    }
+}
 
-    // Branch to target if zero
-    let ip = if cond == 0 { target } else { ip };
-
-    // Execute next instruction
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
-
-threaded_instr!(br_if_z_r(
+pub(crate) unsafe extern "C" fn br_if_nz<R>(
     ip: Ip,
     sp: Sp,
     md: Md,
@@ -412,19 +415,24 @@ threaded_instr!(br_if_z_r(
     sx: Sx,
     dx: Dx,
     cx: Cx,
-) -> ControlFlowBits {
-    // Read operands
-    let cond: u32 = read_reg(ix, sx, dx);
-    let (target, ip) = read_imm(ip);
+) -> ControlFlowBits
+where
+    R: Read<i32>
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let cond: i32 = R::read(&mut args);
+        let target = args.read_imm();
+        if cond != 0 {
+            args.set_ip(target);
+            args.next()
+        } else {
+            args.next()
+        }
+    }
+}
 
-    // Branch to target if zero
-    let ip = if cond == 0 { target } else { ip };
-
-    // Execute next instruction
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
-
-threaded_instr!(br_if_nz_s(
+pub(crate) unsafe extern "C" fn br_table<R>(
     ip: Ip,
     sp: Sp,
     md: Md,
@@ -433,82 +441,19 @@ threaded_instr!(br_if_nz_s(
     sx: Sx,
     dx: Dx,
     cx: Cx,
-) -> ControlFlowBits {
-    // Read operands
-    let (cond, ip): (u32, _) = read_stack(ip, sp);
-    let (target, ip) = read_imm(ip);
-
-    // Branch to target if not zero
-    let ip = if cond != 0 { target } else { ip };
-
-    // Execute next instruction
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
-
-threaded_instr!(br_if_nz_r(
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ix: Ix,
-    sx: Sx,
-    dx: Dx,
-    cx: Cx,
-) -> ControlFlowBits {
-    // Read operands
-    let cond: u32 = read_reg(ix, sx, dx);
-    let (target, ip) = read_imm(ip);
-
-    // Branch to target if not zero
-    let ip = if cond != 0 { target } else { ip };
-
-    // Execute next instruction
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
-
-threaded_instr!(br_table_s(
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ix: Ix,
-    sx: Sx,
-    dx: Dx,
-    cx: Cx,
-) -> ControlFlowBits {
-    // Read operands
-    let (target_idx, ip): (u32, _) = read_stack(ip, sp);
-    let (target_count, ip): (u32, _) = read_imm(ip);
-    let targets: *mut Ip = ip.cast();
-
-    // Branch to target
-    let ip = *targets.add(target_idx.min(target_count) as usize);
-
-    // Execute next instruction
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
-
-threaded_instr!(br_table_r(
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ix: Ix,
-    sx: Sx,
-    dx: Dx,
-    cx: Cx,
-) -> ControlFlowBits {
-    // Read operands
-    let target_idx: u32 = read_reg(ix, sx, dx);
-    let (target_count, ip): (u32, _) = read_imm(ip);
-    let targets: *mut Ip = ip.cast();
-
-    // Branch to target
-    let ip = *targets.add(target_idx.min(target_count) as usize);
-
-    // Execute next instruction
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
+) -> ControlFlowBits
+where 
+    R: Read<u32>
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let target_idx: u32 = R::read(&mut args);
+        let target_count: u32 = args.read_imm();
+        let targets: *mut Ip = args.ip().cast();
+        args.set_ip(*targets.add(target_idx.min(target_count) as usize));
+        args.next()
+    }
+}
 
 threaded_instr!(return_(
     _ip: Ip,
@@ -783,7 +728,7 @@ where
             x1
         };
         W::write(&mut args, y);
-        next(args)
+        args.next()
     }
 }
 
@@ -2173,7 +2118,7 @@ where
         let x = R::read(&mut args);
         let y = r#try!(U::un_op(x));
         W::write(&mut args, y);
-        next(args)
+        args.next()
     }
 }
 
@@ -2199,7 +2144,7 @@ where
         let x0 = R0::read(&mut args);
         let y = r#try!(B::bin_op(x0, x1));
         W::write(&mut args, y);
-        next(args)
+        args.next()
     }
 }
 
@@ -2393,7 +2338,7 @@ pub(crate) struct Args<'a> {
 }
 
 impl<'a> Args<'a> {
-    pub(crate) fn from_parts(
+    fn from_parts(
         ip: Ip,
         sp: Sp,
         md: Md,
@@ -2416,7 +2361,7 @@ impl<'a> Args<'a> {
         }
     }
 
-    pub(crate) fn into_parts(self) -> (Ip, Sp, Md, Ms, Ix, Sx, Dx, Cx<'a>) {
+    fn into_parts(self) -> (Ip, Sp, Md, Ms, Ix, Sx, Dx, Cx<'a>) {
         (
             self.ip(),
             self.sp,
@@ -2429,12 +2374,64 @@ impl<'a> Args<'a> {
         )
     }
 
-    pub(crate) fn ip(&self) -> Ip {
+    fn ip(&self) -> Ip {
         unsafe { self.ip_base.add(self.ip_offset) }
     }
 
-    pub(crate) unsafe fn advance_ip(&mut self, count: usize) {
+    unsafe fn advance_ip(&mut self, count: usize) {
         self.ip_offset += count;
+    }
+
+    fn set_ip(&mut self, ip: Ip) {
+        self.ip_base = ip;
+        self.ip_offset = 0;
+    }
+
+    unsafe fn read_imm<T>(&mut self) -> T {
+        unsafe {
+            let val = ptr::read(self.ip().cast());
+            self.advance_ip(1);
+            val
+        }
+    }
+
+    unsafe fn read_stk<T>(&mut self) -> T {
+        unsafe {
+            let offset = self.read_imm();
+            ptr::read(self.sp.cast::<u8>().offset(offset).cast::<T>())
+        }
+    }
+
+    unsafe fn write_stk<T>(&mut self, val: T) {
+        unsafe {
+            let offset = self.read_imm();
+            ptr::write(self.sp.cast::<u8>().offset(offset).cast::<T>(), val)
+        }
+    }
+
+    fn read_reg<T>(&self) -> T
+    where
+        T: ReadReg,
+    {
+        read_reg(self.ix, self.sx, self.dx)
+    }
+
+    fn write_reg<T>(&mut self, val: T)
+    where
+        T: WriteReg,
+    {
+        let (ix, sx, dx) = write_reg(self.ix, self.sx, self.dx, val);
+        self.ix = ix;
+        self.sx = sx;
+        self.dx = dx;
+    }
+    
+    unsafe fn next(mut self) -> ControlFlowBits {
+        unsafe {
+            let instr: ThreadedInstr = self.read_imm();
+            let (ip, sp, md, ms, ix, sx, dx, cx) = self.into_parts();
+            (instr)(ip, sp, md, ms, ix, sx, dx, cx)
+        }
     }
 }
 
@@ -2450,11 +2447,7 @@ pub(crate) struct Imm;
 
 impl<T> Read<T> for Imm {
     unsafe fn read(args: &mut Args) -> T {
-        unsafe {
-            let val = ptr::read(args.ip().cast());
-            args.advance_ip(1);
-            val
-        }
+        unsafe { args.read_imm() }
     }
 }
 
@@ -2462,19 +2455,13 @@ pub(crate) struct Stk;
 
 impl<T> Read<T> for Stk {
     unsafe fn read(args: &mut Args) -> T {
-        unsafe {
-            let offset = Imm::read(args);
-            ptr::read(args.sp.cast::<u8>().offset(offset).cast())
-        }
+        unsafe { args.read_stk() }
     }
 }
 
 impl<T> Write<T> for Stk {
     unsafe fn write(args: &mut Args, val: T) {
-        unsafe {
-            let offset = Imm::read(args);
-            ptr::write(args.sp.cast::<u8>().offset(offset).cast(), val)
-        }
+        unsafe { args.write_stk(val) }
     }
 }
 
@@ -2485,7 +2472,7 @@ where
     T: ReadReg,
 {
     unsafe fn read(args: &mut Args) -> T {
-        read_reg(args.ix, args.sx, args.dx)
+        args.read_reg()
     }
 }
 
@@ -2494,18 +2481,7 @@ where
     T: WriteReg
 {
     unsafe fn write(args: &mut Args, val: T) {
-        let (ix, sx, dx) = write_reg(args.ix, args.sx, args.dx, val);
-        args.ix = ix;
-        args.sx = sx;
-        args.dx = dx;
-    }
-}
-
-pub(crate) unsafe fn next(mut args: Args) -> ControlFlowBits {
-    unsafe {
-        let instr: ThreadedInstr = Imm::read(&mut args);
-        let (ip, sp, md, ms, ix, sx, dx, cx) = args.into_parts();
-        (instr)(ip, sp, md, ms, ix, sx, dx, cx)
+        args.write_reg(val)
     }
 }
 

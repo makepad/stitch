@@ -2274,25 +2274,25 @@ enum OpdKind {
 
 fn select_br_if_z(kind: OpdKind) -> ThreadedInstr {
     match kind {
-        OpdKind::Stk => exec::br_if_z_s,
-        OpdKind::Reg => exec::br_if_z_r,
-        OpdKind::Imm => panic!("no suitable instruction found"),
+        OpdKind::Stk => exec::br_if_z::<Stk>,
+        OpdKind::Reg => exec::br_if_z::<Reg>,
+        OpdKind::Imm => exec::br_if_z::<Imm>,
     }
 }
 
 fn select_br_if_nz(kind: OpdKind) -> ThreadedInstr {
     match kind {
-        OpdKind::Stk => exec::br_if_nz_s,
-        OpdKind::Reg => exec::br_if_nz_r,
-        OpdKind::Imm => panic!("no suitable instruction found"),
+        OpdKind::Stk => exec::br_if_nz::<Stk>,
+        OpdKind::Reg => exec::br_if_nz::<Reg>,
+        OpdKind::Imm => exec::br_if_nz::<Imm>,
     }
 }
 
 fn select_br_table(kind: OpdKind) -> ThreadedInstr {
     match kind {
-        OpdKind::Stk => exec::br_table_s,
-        OpdKind::Reg => exec::br_table_r,
-        OpdKind::Imm => panic!("no suitable instruction found"),
+        OpdKind::Stk => exec::br_table::<Stk>,
+        OpdKind::Reg => exec::br_table::<Reg>,
+        OpdKind::Imm => exec::br_table::<Imm>,
     }
 }
 
