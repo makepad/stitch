@@ -4,13 +4,14 @@ use {
     crate::{
         code::{Code, InstrSlot},
         data::UnguardedData,
+        downcast::{DowncastRef, DowncastMut},
         elem::UnguardedElem,
         error::Error,
         extern_::UnguardedExtern,
         extern_ref::UnguardedExternRef,
         func::{Func, FuncEntity, UnguardedFunc},
         func_ref::UnguardedFuncRef,
-        global::UnguardedGlobal,
+        global::{GlobalEntity, GlobalEntityT, UnguardedGlobal},
         mem::UnguardedMem,
         ops::*,
         stack::{Stack, StackGuard, StackSlot},
@@ -734,139 +735,55 @@ where
 
 // Variable instructions
 
-macro_rules! global_get {
-    ($global_get:ident, $T:ty) => {
-        threaded_instr!($global_get(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (global, ip): (UnguardedGlobal, _) = read_imm(ip);
-
-            // Perform operation
-            let val = global
-                .as_ref()
-                .downcast_ref::<$T>()
-                .unwrap_unchecked()
-                .get();
-
-            // Write result
-            let ip = write_stack(ip, sp, val);
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-    };
+pub(crate) unsafe extern "C" fn global_get<T, W>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where
+    GlobalEntityT<T>: DowncastRef<GlobalEntity>,
+    T: Copy,
+    W: Write<T>,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let global: UnguardedGlobal = args.read_imm();
+        let global = global.as_ref().downcast_ref::<T>().unwrap_unchecked();
+        let val = global.get();
+        W::write(&mut args, val);
+        args.next()
+    }
 }
 
-global_get!(global_get_i32, i32);
-global_get!(global_get_i64, i64);
-global_get!(global_get_f32, f32);
-global_get!(global_get_f64, f64);
-global_get!(global_get_func_ref, UnguardedFuncRef);
-global_get!(global_get_extern_ref, UnguardedExternRef);
-
-macro_rules! global_set {
-    ($global_set_s:ident, $global_set_r:ident, $global_set_i:ident, $T:ty) => {
-        threaded_instr!($global_set_s(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (val, ip) = read_stack(ip, sp);
-            let (mut global, ip): (UnguardedGlobal, _) = read_imm(ip);
-
-            // Perform operation
-            global
-                .as_mut()
-                .downcast_mut::<$T>()
-                .unwrap_unchecked()
-                .set(val);
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($global_set_r(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let val = read_reg(ix, sx, dx);
-            let (mut global, ip): (UnguardedGlobal, _) = read_imm(ip);
-
-            // Perform operation
-            global
-                .as_mut()
-                .downcast_mut::<$T>()
-                .unwrap_unchecked()
-                .set(val);
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($global_set_i(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (val, ip) = read_imm(ip);
-            let (mut global, ip): (UnguardedGlobal, _) = read_imm(ip);
-
-            // Perform operation
-            global
-                .as_mut()
-                .downcast_mut::<$T>()
-                .unwrap_unchecked()
-                .set(val);
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-    };
+pub(crate) unsafe extern "C" fn global_set<T, R>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where
+    GlobalEntityT<T>: DowncastMut<GlobalEntity>,
+    T: Copy,
+    R: Read<T>,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let val = R::read(&mut args);
+        let mut global: UnguardedGlobal = args.read_imm();
+        let global = global.as_mut().downcast_mut::<T>().unwrap_unchecked();
+        global.set(val);
+        args.next()
+    }
 }
-
-global_set!(global_set_i32_s, global_set_i32_r, global_set_i32_i, i32);
-global_set!(global_set_i64_s, global_set_i64_r, global_set_i64_i, i64);
-global_set!(global_set_f32_s, global_set_f32_r, global_set_f32_i, f32);
-global_set!(global_set_f64_s, global_set_f64_r, global_set_f64_i, f64);
-global_set!(
-    global_set_func_ref_s,
-    global_set_func_ref_r,
-    global_set_func_ref_i,
-    UnguardedFuncRef
-);
-global_set!(
-    global_set_extern_ref_s,
-    global_set_extern_ref_r,
-    global_set_extern_ref_i,
-    UnguardedExternRef
-);
 
 // Table instructions
 

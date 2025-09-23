@@ -7,11 +7,13 @@ use {
             StoreInfo, UnOpInfo, UncompiledCode,
         },
         decode::DecodeError,
+        downcast::DowncastMut,
         exec,
         exec::{Imm, ReadReg, Reg, Stk, ThreadedInstr, WriteReg},
         extern_ref::{ExternRef, UnguardedExternRef},
         func::{Func, FuncEntity, FuncType},
         func_ref::{FuncRef, UnguardedFuncRef},
+        global::{GlobalEntity, GlobalEntityT},
         instance::Instance,
         ref_::RefType,
         stack::StackSlot,
@@ -2274,25 +2276,25 @@ enum OpdKind {
 
 fn select_br_if_z(kind: OpdKind) -> ThreadedInstr {
     match kind {
-        OpdKind::Stk => exec::br_if_z::<Stk>,
-        OpdKind::Reg => exec::br_if_z::<Reg>,
         OpdKind::Imm => exec::br_if_z::<Imm>,
+        OpdKind::Reg => exec::br_if_z::<Reg>,
+        OpdKind::Stk => exec::br_if_z::<Stk>,
     }
 }
 
 fn select_br_if_nz(kind: OpdKind) -> ThreadedInstr {
     match kind {
-        OpdKind::Stk => exec::br_if_nz::<Stk>,
-        OpdKind::Reg => exec::br_if_nz::<Reg>,
         OpdKind::Imm => exec::br_if_nz::<Imm>,
+        OpdKind::Reg => exec::br_if_nz::<Reg>,
+        OpdKind::Stk => exec::br_if_nz::<Stk>,
     }
 }
 
 fn select_br_table(kind: OpdKind) -> ThreadedInstr {
     match kind {
-        OpdKind::Stk => exec::br_table::<Stk>,
-        OpdKind::Reg => exec::br_table::<Reg>,
         OpdKind::Imm => exec::br_table::<Imm>,
+        OpdKind::Reg => exec::br_table::<Reg>,
+        OpdKind::Stk => exec::br_table::<Stk>,
     }
 }
 
@@ -2317,16 +2319,16 @@ fn select_ref_is_null(type_: RefType, kind: OpdKind) -> ThreadedInstr {
 
 fn select_select(type_: ValType, input_0: OpdKind, input_1: OpdKind, input_2: OpdKind) -> ThreadedInstr {
     match type_ {
-        ValType::I32 => select_select_inner::<i32>(input_0, input_1, input_2),
-        ValType::I64 => select_select_inner::<i64>(input_0, input_1, input_2),
-        ValType::F32 => select_select_inner::<f32>(input_0, input_1, input_2),
-        ValType::F64 => select_select_inner::<f64>(input_0, input_1, input_2),
-        ValType::FuncRef => select_select_inner::<UnguardedFuncRef>(input_0, input_1, input_2),
-        ValType::ExternRef => select_select_inner::<UnguardedExternRef>(input_0, input_1, input_2),
+        ValType::I32 => select_select_typed::<i32>(input_0, input_1, input_2),
+        ValType::I64 => select_select_typed::<i64>(input_0, input_1, input_2),
+        ValType::F32 => select_select_typed::<f32>(input_0, input_1, input_2),
+        ValType::F64 => select_select_typed::<f64>(input_0, input_1, input_2),
+        ValType::FuncRef => select_select_typed::<UnguardedFuncRef>(input_0, input_1, input_2),
+        ValType::ExternRef => select_select_typed::<UnguardedExternRef>(input_0, input_1, input_2),
     }
 }
 
-fn select_select_inner<T>(input_0: OpdKind, input_1: OpdKind, input_2: OpdKind) -> ThreadedInstr
+fn select_select_typed<T>(input_0: OpdKind, input_1: OpdKind, input_2: OpdKind) -> ThreadedInstr
 where
     T: ReadReg + WriteReg
 {
@@ -2363,35 +2365,35 @@ where
 
 fn select_global_get(type_: ValType) -> ThreadedInstr {
     match type_ {
-        ValType::I32 => exec::global_get_i32,
-        ValType::I64 => exec::global_get_i64,
-        ValType::F32 => exec::global_get_f32,
-        ValType::F64 => exec::global_get_f64,
-        ValType::FuncRef => exec::global_get_func_ref,
-        ValType::ExternRef => exec::global_get_extern_ref,
+        ValType::I32 => exec::global_get::<i32, Stk>,
+        ValType::I64 => exec::global_get::<i64, Stk>,
+        ValType::F32 => exec::global_get::<f32, Stk>,
+        ValType::F64 => exec::global_get::<f64, Stk>,
+        ValType::FuncRef => exec::global_get::<UnguardedFuncRef, Stk>,
+        ValType::ExternRef => exec::global_get::<UnguardedExternRef, Stk>,
     }
 }
 
-fn select_global_set(type_: ValType, kind: OpdKind) -> ThreadedInstr {
-    match (type_, kind) {
-        (ValType::I32, OpdKind::Stk) => exec::global_set_i32_s,
-        (ValType::I32, OpdKind::Reg) => exec::global_set_i32_r,
-        (ValType::I32, OpdKind::Imm) => exec::global_set_i32_i,
-        (ValType::I64, OpdKind::Stk) => exec::global_set_i64_s,
-        (ValType::I64, OpdKind::Reg) => exec::global_set_i64_r,
-        (ValType::I64, OpdKind::Imm) => exec::global_set_i64_i,
-        (ValType::F32, OpdKind::Stk) => exec::global_set_f32_s,
-        (ValType::F32, OpdKind::Reg) => exec::global_set_f32_r,
-        (ValType::F32, OpdKind::Imm) => exec::global_set_f32_i,
-        (ValType::F64, OpdKind::Stk) => exec::global_set_f64_s,
-        (ValType::F64, OpdKind::Reg) => exec::global_set_f64_r,
-        (ValType::F64, OpdKind::Imm) => exec::global_set_f64_i,
-        (ValType::FuncRef, OpdKind::Stk) => exec::global_set_func_ref_s,
-        (ValType::FuncRef, OpdKind::Reg) => exec::global_set_func_ref_r,
-        (ValType::FuncRef, OpdKind::Imm) => exec::global_set_func_ref_i,
-        (ValType::ExternRef, OpdKind::Stk) => exec::global_set_extern_ref_s,
-        (ValType::ExternRef, OpdKind::Reg) => exec::global_set_extern_ref_r,
-        (ValType::ExternRef, OpdKind::Imm) => exec::global_set_extern_ref_i,
+fn select_global_set(type_: ValType, input: OpdKind) -> ThreadedInstr {
+    match type_ {
+        ValType::I32 => select_global_set_typed::<i32>(input),
+        ValType::I64 => select_global_set_typed::<i64>(input),
+        ValType::F32 => select_global_set_typed::<f32>(input),
+        ValType::F64 => select_global_set_typed::<f64>(input),
+        ValType::FuncRef => select_global_set_typed::<UnguardedFuncRef>(input),
+        ValType::ExternRef => select_global_set_typed::<UnguardedExternRef>(input),
+    }
+}
+
+fn select_global_set_typed<T>(input: OpdKind) -> ThreadedInstr
+where
+    GlobalEntityT<T>: DowncastMut<GlobalEntity>,
+    T: Copy + ReadReg
+{
+    match input {
+        OpdKind::Imm => exec::global_set::<T, Imm>,
+        OpdKind::Reg => exec::global_set::<T, Reg>,
+        OpdKind::Stk => exec::global_set::<T, Stk>,
     }
 }
 
