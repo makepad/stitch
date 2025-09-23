@@ -377,3 +377,30 @@ impl From<RefType> for ValType {
         }
     }
 }
+
+pub(crate) trait ValTypeOf {
+    fn val_type_of() -> ValType;
+}
+
+macro_rules! impl_val_type_of {
+    ($($($T:ty)* => $ValType:expr),*) => {
+        $(
+            $(
+                impl ValTypeOf for $T {
+                    fn val_type_of() -> ValType {
+                        $ValType
+                    }
+                }
+            )*
+        )*
+    }
+}
+
+impl_val_type_of! {
+    i32 u32 => ValType::I32,
+    i64 u64 => ValType::I64,
+    f32 => ValType::F32,
+    f64 => ValType::F64,
+    FuncRef => ValType::FuncRef,
+    ExternRef => ValType::ExternRef
+}

@@ -9,8 +9,9 @@ use {
         func::FuncType,
         global::Mut,
         module::ModuleBuilder,
+        ops::*,
         ref_::RefType,
-        val::ValType,
+        val::{ValType, ValTypeOf}
     },
     std::{mem, ops::Deref},
 };
@@ -84,6 +85,37 @@ struct Validation<'a> {
 }
 
 impl<'a> Validation<'a> {
+    fn validate_un_op<T, U>(&mut self) -> Result<(), DecodeError>
+    where
+        T: ValTypeOf,
+        U: UnOp<T>,
+        U::Output: ValTypeOf,
+    {
+        self.validate_un_op_inner(T::val_type_of(), U::Output::val_type_of())
+    }
+
+    fn validate_un_op_inner(&mut self, input_type: ValType, output_type: ValType) -> Result<(), DecodeError> {
+        self.pop_opd()?.check(input_type)?;
+        self.push_opd(output_type);
+        Ok(())
+    }
+
+    fn validate_bin_op<T, B>(&mut self) -> Result<(), DecodeError>
+    where
+        T: ValTypeOf,
+        B: BinOp<T>,
+        B::Output: ValTypeOf,
+    {
+        self.validate_bin_op_inner(T::val_type_of(), B::Output::val_type_of())
+    }
+
+    fn validate_bin_op_inner(&mut self, input_type: ValType, output_type: ValType) -> Result<(), DecodeError> {
+        self.pop_opd()?.check(input_type)?;
+        self.pop_opd()?.check(input_type)?;
+        self.push_opd(output_type);
+        Ok(())
+    }
+
     fn resolve_block_type(&self, type_: BlockType) -> Result<FuncType, DecodeError> {
         match type_ {
             BlockType::TypeIdx(idx) => self.module.type_(idx).cloned(),
@@ -543,6 +575,550 @@ impl<'a> InstrVisitor for Validation<'a> {
     fn visit_f64_const(&mut self, _val: f64) -> Result<(), Self::Error> {
         self.push_opd(ValType::F64);
         Ok(())
+    }
+
+    fn visit_i32_eqz(&mut self) -> Result<(), DecodeError> {
+        self.validate_un_op::<i32, Eqz>()
+    }
+
+    fn visit_i32_eq(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<i32, Eq>()
+    }
+
+    fn visit_i32_ne(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<i32, Ne>()
+    }
+
+    fn visit_i32_lt_s(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<i32, Lt>()
+    }
+
+    fn visit_i32_lt_u(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<u32, Lt>()
+    }
+
+    fn visit_i32_gt_s(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<i32, Gt>()
+    }
+
+    fn visit_i32_gt_u(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<u32, Gt>()
+    }
+
+    fn visit_i32_le_s(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<i32, Le>()
+    }
+
+    fn visit_i32_le_u(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<u32, Le>()
+    }
+
+    fn visit_i32_ge_s(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<i32, Ge>()
+    }
+
+    fn visit_i32_ge_u(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<u32, Ge>()
+    }
+
+    fn visit_i64_eqz(&mut self) -> Result<(), DecodeError> {
+        self.validate_un_op::<i64, Eqz>()
+    }
+
+    fn visit_i64_eq(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<i64, Eq>()
+    }
+
+    fn visit_i64_ne(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<i64, Ne>()
+    }
+
+    fn visit_i64_lt_s(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<i64, Lt>()
+    }
+
+    fn visit_i64_lt_u(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<u64, Lt>()
+    }
+
+    fn visit_i64_gt_s(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<i64, Gt>()
+    }
+
+    fn visit_i64_gt_u(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<u64, Gt>()
+    }
+
+    fn visit_i64_le_s(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<i64, Le>()
+    }
+
+    fn visit_i64_le_u(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<u64, Le>()
+    }
+
+    fn visit_i64_ge_s(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<i64, Ge>()
+    }
+
+    fn visit_i64_ge_u(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<u64, Ge>()
+    }
+
+    fn visit_f32_eq(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<f32, Eq>()
+    }
+
+    fn visit_f32_ne(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<f32, Ne>()
+    }
+
+    fn visit_f32_lt(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<f32, Lt>()
+    }
+
+    fn visit_f32_gt(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<f32, Gt>()
+    }
+
+    fn visit_f32_le(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<f32, Le>()
+    }
+
+    fn visit_f32_ge(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<f32, Ge>()
+    }
+
+    fn visit_f64_eq(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<f64, Eq>()
+    }
+
+    fn visit_f64_ne(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<f64, Ne>()
+    }
+
+    fn visit_f64_lt(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<f64, Lt>()
+    }
+
+    fn visit_f64_gt(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<f64, Gt>()
+    }
+
+    fn visit_f64_le(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<f64, Le>()
+    }
+
+    fn visit_f64_ge(&mut self) -> Result<(), DecodeError> {
+        self.validate_bin_op::<f64, Ge>()
+    }
+
+    fn visit_i32_clz(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i32, Clz>()
+    }
+
+    fn visit_i32_ctz(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i32, Ctz>()
+    }
+
+    fn visit_i32_popcnt(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i32, Popcnt>()
+    }
+
+    fn visit_i32_add(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i32, Add>()
+    }
+
+    fn visit_i32_sub(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i32, Sub>()
+    }
+
+    fn visit_i32_mul(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i32, Mul>()
+    }
+
+    fn visit_i32_div_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i32, Div>()
+    }
+
+    fn visit_i32_div_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<u32, Div>()
+    }
+
+    fn visit_i32_rem_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i32, Rem>()
+    }
+
+    fn visit_i32_rem_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<u32, Rem>()
+    }
+
+    fn visit_i32_and(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i32, And>()
+    }
+
+    fn visit_i32_or(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i32, Or>()
+    }
+
+    fn visit_i32_xor(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i32, Xor>()
+    }
+
+    fn visit_i32_shl(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i32, Shl>()
+    }
+
+    fn visit_i32_shr_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i32, Shr>()
+    }
+
+    fn visit_i32_shr_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<u32, Shr>()
+    }
+
+    fn visit_i32_rotl(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i32, Rotl>()
+    }
+
+    fn visit_i32_rotr(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i32, Rotr>()
+    }
+
+    fn visit_i64_clz(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i64, Clz>()
+    }
+
+    fn visit_i64_ctz(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i64, Ctz>()
+    }
+
+    fn visit_i64_popcnt(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i64, Popcnt>()
+    }
+
+    fn visit_i64_add(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i64, Add>()
+    }
+
+    fn visit_i64_sub(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i64, Sub>()
+    }
+
+    fn visit_i64_mul(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i64, Mul>()
+    }
+
+    fn visit_i64_div_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i64, Div>()
+    }
+
+    fn visit_i64_div_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<u64, Div>()
+    }
+
+    fn visit_i64_rem_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i64, Rem>()
+    }
+
+    fn visit_i64_rem_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<u64, Rem>()
+    }
+
+    fn visit_i64_and(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i64, And>()
+    }
+
+    fn visit_i64_or(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i64, Or>()
+    }
+
+    fn visit_i64_xor(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i64, Xor>()
+    }
+
+    fn visit_i64_shl(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i64, Shl>()
+    }
+
+    fn visit_i64_shr_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i64, Shr>()
+    }
+
+    fn visit_i64_shr_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<u64, Shr>()
+    }
+
+    fn visit_i64_rotl(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i64, Rotl>()
+    }
+
+    fn visit_i64_rotr(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<i64, Rotr>()
+    }
+
+    fn visit_f32_abs(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f32, Abs>()
+    }
+
+    fn visit_f32_neg(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f32, Neg>()
+    }
+
+    fn visit_f32_ceil(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f32, Ceil>()
+    }
+
+    fn visit_f32_floor(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f32, Floor>()
+    }
+
+    fn visit_f32_trunc(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f32, Trunc>()
+    }
+
+    fn visit_f32_nearest(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f32, Nearest>()
+    }
+
+    fn visit_f32_sqrt(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f32, Sqrt>()
+    }
+
+    fn visit_f32_add(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<f32, Add>()
+    }
+
+    fn visit_f32_sub(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<f32, Sub>()
+    }
+
+    fn visit_f32_mul(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<f32, Mul>()
+    }
+
+    fn visit_f32_div(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<f32, Div>()
+    }
+
+    fn visit_f32_min(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<f32, Min>()
+    }
+
+    fn visit_f32_max(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<f32, Max>()
+    }
+
+    fn visit_f32_copysign(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<f32, Copysign>()
+    }
+
+    fn visit_f64_abs(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f64, Abs>()
+    }
+
+    fn visit_f64_neg(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f64, Neg>()
+    }
+
+    fn visit_f64_ceil(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f64, Ceil>()
+    }
+
+    fn visit_f64_floor(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f64, Floor>()
+    }
+
+    fn visit_f64_trunc(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f64, Trunc>()
+    }
+
+    fn visit_f64_nearest(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f64, Nearest>()
+    }
+
+    fn visit_f64_sqrt(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f64, Sqrt>()
+    }
+
+    fn visit_f64_add(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<f64, Add>()
+    }
+
+    fn visit_f64_sub(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<f64, Sub>()
+    }
+
+    fn visit_f64_mul(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<f64, Mul>()
+    }
+
+    fn visit_f64_div(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<f64, Div>()
+    }
+
+    fn visit_f64_min(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<f64, Min>()
+    }
+
+    fn visit_f64_max(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<f64, Max>()
+    }
+
+    fn visit_f64_copysign(&mut self) -> Result<(), Self::Error> {
+        self.validate_bin_op::<f64, Copysign>()
+    }
+
+    fn visit_i32_wrap_i64(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i64, WrapTo<i32>>()
+    }
+
+    fn visit_i32_trunc_f32_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f32, TruncTo<i32>>()
+    }
+
+    fn visit_i32_trunc_f32_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f32, TruncTo<u32>>()
+    }
+
+    fn visit_i32_trunc_f64_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f64, TruncTo<i32>>()
+    }
+
+    fn visit_i32_trunc_f64_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f64, TruncTo<u32>>()
+    }
+
+    fn visit_i64_extend_i32_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i32, ExtendTo<i64>>()
+    }
+
+    fn visit_i64_extend_i32_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<u32, ExtendTo<u64>>()
+    }
+
+    fn visit_i64_trunc_f32_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f32, TruncTo<i64>>()
+    }
+
+    fn visit_i64_trunc_f32_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f32, TruncTo<u64>>()
+    }
+
+    fn visit_i64_trunc_f64_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f64, TruncTo<i64>>()
+    }
+
+    fn visit_i64_trunc_f64_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f64, TruncTo<u64>>()
+    }
+
+    fn visit_f32_convert_i32_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i32, ConvertTo<f32>>()
+    }
+
+    fn visit_f32_convert_i32_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<u32, ConvertTo<f32>>()
+    }
+
+    fn visit_f32_convert_i64_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i64, ConvertTo<f32>>()
+    }
+
+    fn visit_f32_convert_i64_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<u64, ConvertTo<f32>>()
+    }
+
+    fn visit_f32_demote_f64(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f64, DemoteTo<f32>>()
+    }
+
+    fn visit_f64_convert_i32_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i32, ConvertTo<f64>>()
+    }
+
+    fn visit_f64_convert_i32_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<u32, ConvertTo<f64>>()
+    }
+
+    fn visit_f64_convert_i64_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i64, ConvertTo<f64>>()
+    }
+
+    fn visit_f64_convert_i64_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<u64, ConvertTo<f64>>()
+    }
+
+    fn visit_f64_promote_f32(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f32, PromoteTo<f64>>()
+    }
+
+    fn visit_i32_reinterpret_f32(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f32, ReinterpretTo<i32>>()
+    }
+
+    fn visit_i64_reinterpret_f64(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f64, ReinterpretTo<i64>>()
+    }
+
+    fn visit_f32_reinterpret_i32(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i32, ReinterpretTo<f32>>()
+    }
+
+    fn visit_f64_reinterpret_i64(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i64, ReinterpretTo<f64>>()
+    }
+
+    fn visit_i32_extend8_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i32, ExtendFrom<i8>>()
+    }
+
+    fn visit_i32_extend16_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i32, ExtendFrom<i16>>()
+    }
+
+    fn visit_i64_extend8_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i64, ExtendFrom<i8>>()
+    }
+
+    fn visit_i64_extend16_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i64, ExtendFrom<i16>>()
+    }
+
+    fn visit_i64_extend32_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<i64, ExtendFrom<i32>>()
+    }
+
+    fn visit_i32_trunc_sat_f32_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f32, TruncSatTo<i32>>()
+    }
+
+    fn visit_i32_trunc_sat_f32_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f32, TruncSatTo<u32>>()
+    }
+
+    fn visit_i32_trunc_sat_f64_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f64, TruncSatTo<i32>>()
+    }
+
+    fn visit_i32_trunc_sat_f64_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f64, TruncSatTo<u32>>()
+    }
+
+    fn visit_i64_trunc_sat_f32_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f32, TruncSatTo<i64>>()
+    }
+
+    fn visit_i64_trunc_sat_f32_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f32, TruncSatTo<u64>>()
+    }
+
+    fn visit_i64_trunc_sat_f64_s(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f64, TruncSatTo<i64>>()
+    }
+
+    fn visit_i64_trunc_sat_f64_u(&mut self) -> Result<(), Self::Error> {
+        self.validate_un_op::<f64, TruncSatTo<u64>>()
     }
 
     fn visit_un_op(&mut self, info: UnOpInfo) -> Result<(), Self::Error> {

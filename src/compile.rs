@@ -15,11 +15,12 @@ use {
         func_ref::{FuncRef, UnguardedFuncRef},
         global::{GlobalEntity, GlobalEntityT},
         instance::Instance,
+        ops::*,
         ref_::RefType,
         stack::StackSlot,
         store::Store,
         table::{TableEntity, TableEntityT},
-        val::{UnguardedVal, ValType},
+        val::{UnguardedVal, ValType, ValTypeOf},
     },
     std::{mem, ops::Deref},
 };
@@ -149,6 +150,103 @@ struct Compile<'a> {
 }
 
 impl<'a> Compile<'a> {
+    fn compile_un_op<T, U>(&mut self) -> Result<(), DecodeError>
+    where
+        T: ReadReg,
+        U: UnOp<T>,
+        U::Output: ValTypeOf + WriteReg,
+    {
+        if self.block(0).is_unreachable {
+            return Ok(());
+        }
+        self.compile_un_op_inner(
+            select_un_op::<T, U>(self.opd(0).kind()),
+            U::Output::val_type_of(),
+        )
+    }
+    
+    fn compile_un_op_inner(&mut self, un_op: ThreadedInstr, output_type: ValType) -> Result<(), DecodeError> {
+        // Unary operations write their output to a register, so we need to ensure that the output
+        // register is available for the operation to use.
+        //
+        // If the output register is already occupied, then we need to preserve the register on the
+        // stack. Otherwise, the operation will overwrite the register while it's already occupied.
+        //
+        // The only exception is if the input occupies the output register. In that case, the
+        // operation can safely overwrite the register, since the input will be consumed by the
+        // operation anyway.
+        let output_reg_idx = output_type.reg_idx();
+        if self.is_reg_occupied(output_reg_idx) && !self.opd(0).occupies_reg(output_reg_idx) {
+            self.preserve_reg(output_reg_idx);
+        }
+
+        // Emit the instruction.
+        self.emit(un_op);
+
+        // Emit and pop the inputs from the stack.
+        self.emit_opd(0);
+        self.pop_opd();
+
+        // If the operation has an output, push the output onto the stack and allocate a register
+        // for it.
+        self.push_opd(output_type);
+        self.alloc_reg();
+
+        Ok(())
+    }
+
+    fn compile_bin_op<T, B>(&mut self) -> Result<(), DecodeError>
+    where
+        T: ReadReg,
+        B: BinOp<T>,
+        B::Output: ValTypeOf + WriteReg,
+    {
+        if self.block(0).is_unreachable {
+            return Ok(());
+        }
+        self.compile_bin_op_inner(
+            select_bin_op::<T, B>(
+                self.opd(1).kind(),
+                self.opd(0).kind(),
+            ),
+            B::Output::val_type_of(),
+        )
+    }
+
+    fn compile_bin_op_inner(&mut self, bin_op: ThreadedInstr, output_type: ValType) -> Result<(), DecodeError> {
+        // Binary operations write their output to a register, so we need to ensure that the output
+        // register is available for the operation to use.
+        //
+        // If the output register is already occupied, then we need to preserve the register on the
+        // stack. Otherwise, the operation will the register while it's already occupied.
+        //
+        // The only exception is if one of the inputs occupies the output register. In that case,
+        // the operation can safely overwrite the register, since the input will be consumed by the
+        // operation anyway.
+        let output_reg_idx = output_type.reg_idx();
+        if self.is_reg_occupied(output_reg_idx)
+            && !self.opd(1).occupies_reg(output_reg_idx)
+            && !self.opd(0).occupies_reg(output_reg_idx)
+        {
+            self.preserve_reg(output_reg_idx);
+        }
+
+        // Emit the instruction.
+        self.emit(bin_op);
+
+        // Emit the inputs and pop them from the stack.
+        self.emit_opd(0);
+        self.pop_opd();
+        self.emit_opd(0);
+        self.pop_opd();
+
+        // Push the output onto the stack and allocate a register for it.
+        self.push_opd(output_type);
+        self.alloc_reg();
+
+        Ok(())
+    }
+
     // Methods for operating on types.
 
     /// Resolves a [`BlockType`] to its corresponding [`FuncType`].
@@ -2004,7 +2102,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit the instruction.
-        self.emit(select_un_op(info, self.opd(0).kind()));
+        self.emit(select_un_op_from_info(info, self.opd(0).kind()));
 
         // Emit and pop the inputs from the stack.
         self.emit_opd(0);
@@ -2018,6 +2116,550 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         Ok(())
+    }
+
+    fn visit_i32_eqz(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i32, Eqz>()
+    }
+
+    fn visit_i32_eq(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, Eq>()
+    }
+
+    fn visit_i32_ne(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, Ne>()
+    }
+
+    fn visit_i32_lt_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, Lt>()
+    }
+
+    fn visit_i32_lt_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<u32, Lt>()
+    }
+
+    fn visit_i32_gt_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, Gt>()
+    }
+
+    fn visit_i32_gt_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<u32, Gt>()
+    }
+
+    fn visit_i32_le_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, Le>()
+    }
+
+    fn visit_i32_le_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<u32, Le>()
+    }
+
+    fn visit_i32_ge_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, Ge>()
+    }
+
+    fn visit_i32_ge_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<u32, Ge>()
+    }
+
+    fn visit_i64_eqz(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i64, Eqz>()
+    }
+
+    fn visit_i64_eq(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, Eq>()
+    }
+
+    fn visit_i64_ne(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, Ne>()
+    }
+
+    fn visit_i64_lt_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, Lt>()
+    }
+
+    fn visit_i64_lt_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<u64, Lt>()
+    }
+
+    fn visit_i64_gt_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, Gt>()
+    }
+
+    fn visit_i64_gt_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<u64, Gt>()
+    }
+
+    fn visit_i64_le_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, Le>()
+    }
+
+    fn visit_i64_le_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<u64, Le>()
+    }
+
+    fn visit_i64_ge_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, Ge>()
+    }
+
+    fn visit_i64_ge_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<u64, Ge>()
+    }
+
+    fn visit_f32_eq(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f32, Eq>()
+    }
+
+    fn visit_f32_ne(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f32, Ne>()
+    }
+
+    fn visit_f32_lt(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f32, Lt>()
+    }
+
+    fn visit_f32_gt(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f32, Gt>()
+    }
+
+    fn visit_f32_le(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f32, Le>()
+    }
+
+    fn visit_f32_ge(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f32, Ge>()
+    }
+
+    fn visit_f64_eq(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f64, Eq>()
+    }
+
+    fn visit_f64_ne(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f64, Ne>()
+    }
+
+    fn visit_f64_lt(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f64, Lt>()
+    }
+
+    fn visit_f64_gt(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f64, Gt>()
+    }
+
+    fn visit_f64_le(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f64, Le>()
+    }
+
+    fn visit_f64_ge(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f64, Ge>()
+    }
+
+    fn visit_i32_clz(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i32, Clz>()
+    }
+
+    fn visit_i32_ctz(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i32, Ctz>()
+    }
+
+    fn visit_i32_popcnt(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i32, Popcnt>()
+    }
+    
+    fn visit_i32_add(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, Add>()
+    }
+
+    fn visit_i32_sub(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, Sub>()
+    }
+
+    fn visit_i32_mul(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, Mul>()
+    }
+
+    fn visit_i32_div_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, Div>()
+    }
+
+    fn visit_i32_div_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<u32, Div>()
+    }
+
+    fn visit_i32_rem_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, Rem>()
+    }
+
+    fn visit_i32_rem_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<u32, Rem>()
+    }
+
+    fn visit_i32_and(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, And>()
+    }
+
+    fn visit_i32_or(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, Or>()
+    }
+
+    fn visit_i32_xor(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, Xor>()
+    }
+
+    fn visit_i32_shl(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, Shl>()
+    }
+
+    fn visit_i32_shr_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, Shr>()
+    }
+
+    fn visit_i32_shr_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<u32, Shr>()
+    }
+
+    fn visit_i32_rotl(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, Rotl>()
+    }
+
+    fn visit_i32_rotr(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i32, Rotr>()
+    }
+
+    fn visit_i64_clz(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i64, Clz>()
+    }
+
+    fn visit_i64_ctz(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i64, Ctz>()
+    }
+
+    fn visit_i64_popcnt(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i64, Popcnt>()
+    }
+
+    fn visit_i64_add(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, Add>()
+    }
+
+    fn visit_i64_sub(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, Sub>()
+    }
+
+    fn visit_i64_mul(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, Mul>()
+    }
+
+    fn visit_i64_div_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, Div>()
+    }
+
+    fn visit_i64_div_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<u64, Div>()
+    }
+
+    fn visit_i64_rem_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, Rem>()
+    }
+
+    fn visit_i64_rem_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<u64, Rem>()
+    }
+
+    fn visit_i64_and(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, And>()
+    }
+
+    fn visit_i64_or(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, Or>()
+    }
+
+    fn visit_i64_xor(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, Xor>()
+    }
+
+    fn visit_i64_shl(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, Shl>()
+    }
+
+    fn visit_i64_shr_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, Shr>()
+    }
+
+    fn visit_i64_shr_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<u64, Shr>()
+    }
+
+    fn visit_i64_rotl(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, Rotl>()
+    }
+
+    fn visit_i64_rotr(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<i64, Rotr>()
+    }
+
+    fn visit_f32_abs(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f32, Abs>()
+    }
+
+    fn visit_f32_neg(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f32, Neg>()
+    }
+
+    fn visit_f32_ceil(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f32, Ceil>()
+    }
+
+    fn visit_f32_floor(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f32, Floor>()
+    }
+
+    fn visit_f32_trunc(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f32, Trunc>()
+    }
+
+    fn visit_f32_nearest(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f32, Nearest>()
+    }
+
+    fn visit_f32_sqrt(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f32, Sqrt>()
+    }
+
+    fn visit_f32_add(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f32, Add>()
+    }
+
+    fn visit_f32_sub(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f32, Sub>()
+    }
+
+    fn visit_f32_mul(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f32, Mul>()
+    }
+
+    fn visit_f32_div(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f32, Div>()
+    }
+
+    fn visit_f32_min(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f32, Min>()
+    }
+
+    fn visit_f32_max(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f32, Max>()
+    }
+
+    fn visit_f32_copysign(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f32, Copysign>()
+    }
+
+    fn visit_f64_abs(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f64, Abs>()
+    }
+
+    fn visit_f64_neg(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f64, Neg>()
+    }
+
+    fn visit_f64_ceil(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f64, Ceil>()
+    }
+
+    fn visit_f64_floor(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f64, Floor>()
+    }
+
+    fn visit_f64_trunc(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f64, Trunc>()
+    }
+
+    fn visit_f64_nearest(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f64, Nearest>()
+    }
+
+    fn visit_f64_sqrt(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f64, Sqrt>()
+    }
+
+    fn visit_f64_add(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f64, Add>()
+    }
+
+    fn visit_f64_sub(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f64, Sub>()
+    }
+
+    fn visit_f64_mul(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f64, Mul>()
+    }
+
+    fn visit_f64_div(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f64, Div>()
+    }
+
+    fn visit_f64_min(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f64, Min>()
+    }
+
+    fn visit_f64_max(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f64, Max>()
+    }
+
+    fn visit_f64_copysign(&mut self) -> Result<(), DecodeError> {
+        self.compile_bin_op::<f64, Copysign>()
+    }
+
+    fn visit_i32_wrap_i64(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i64, WrapTo<i32>>()
+    }
+
+    fn visit_i32_trunc_f32_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f32, TruncTo<i32>>()
+    }
+
+    fn visit_i32_trunc_f32_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f32, TruncTo<u32>>()
+    }
+
+    fn visit_i32_trunc_f64_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f64, TruncTo<i32>>()
+    }
+
+    fn visit_i32_trunc_f64_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f64, TruncTo<u32>>()
+    }
+
+    fn visit_i64_extend_i32_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i32, ExtendTo<i64>>()
+    }
+
+    fn visit_i64_extend_i32_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<u32, ExtendTo<u64>>()
+    }
+
+    fn visit_i64_trunc_f32_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f32, TruncTo<i64>>()
+    }
+
+    fn visit_i64_trunc_f32_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f32, TruncTo<u64>>()
+    }
+
+    fn visit_i64_trunc_f64_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f64, TruncTo<i64>>()
+    }
+
+    fn visit_i64_trunc_f64_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f64, TruncTo<u64>>()
+    }
+
+    fn visit_f32_convert_i32_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i32, ConvertTo<f32>>()
+    }
+
+    fn visit_f32_convert_i32_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<u32, ConvertTo<f32>>()
+    }
+
+    fn visit_f32_convert_i64_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i64, ConvertTo<f32>>()
+    }
+
+    fn visit_f32_convert_i64_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<u64, ConvertTo<f32>>()
+    }
+
+    fn visit_f32_demote_f64(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f64, DemoteTo<f32>>()
+    }
+
+    fn visit_f64_convert_i32_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i32, ConvertTo<f64>>()
+    }
+
+    fn visit_f64_convert_i32_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<u32, ConvertTo<f64>>()
+    }
+
+    fn visit_f64_convert_i64_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i64, ConvertTo<f64>>()
+    }
+
+    fn visit_f64_convert_i64_u(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<u64, ConvertTo<f64>>()
+    }
+
+    fn visit_f64_promote_f32(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f32, PromoteTo<f64>>()
+    }
+
+    fn visit_i32_reinterpret_f32(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f32, ReinterpretTo<i32>>()
+    }
+
+    fn visit_i64_reinterpret_f64(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<f64, ReinterpretTo<i64>>()
+    }
+
+    fn visit_f32_reinterpret_i32(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i32, ReinterpretTo<f32>>()
+    }
+
+    fn visit_f64_reinterpret_i64(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i64, ReinterpretTo<f64>>()
+    }
+
+    fn visit_i32_extend8_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i32, ExtendFrom<i8>>()
+    }
+
+    fn visit_i32_extend16_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i32, ExtendFrom<i16>>()
+    }
+
+    fn visit_i64_extend8_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i64, ExtendFrom<i8>>()
+    }
+
+    fn visit_i64_extend16_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i64, ExtendFrom<i16>>()
+    }
+
+    fn visit_i64_extend32_s(&mut self) -> Result<(), DecodeError> {
+        self.compile_un_op::<i64, ExtendFrom<i32>>()
+    }
+
+    fn visit_i32_trunc_sat_f32_s(&mut self) -> Result<(), Self::Error> {
+        self.compile_un_op::<f32, TruncSatTo<i32>>()
+    }
+
+    fn visit_i32_trunc_sat_f32_u(&mut self) -> Result<(), Self::Error> {
+        self.compile_un_op::<f32, TruncSatTo<u32>>()
+    }
+
+    fn visit_i32_trunc_sat_f64_s(&mut self) -> Result<(), Self::Error> {
+        self.compile_un_op::<f64, TruncSatTo<i32>>()
+    }
+
+    fn visit_i32_trunc_sat_f64_u(&mut self) -> Result<(), Self::Error> {
+        self.compile_un_op::<f64, TruncSatTo<u32>>()
+    }
+
+    fn visit_i64_trunc_sat_f32_s(&mut self) -> Result<(), Self::Error> {
+        self.compile_un_op::<f32, TruncSatTo<i64>>()
+    }
+
+    fn visit_i64_trunc_sat_f32_u(&mut self) -> Result<(), Self::Error> {
+        self.compile_un_op::<f32, TruncSatTo<u64>>()
+    }
+
+    fn visit_i64_trunc_sat_f64_s(&mut self) -> Result<(), Self::Error> {
+        self.compile_un_op::<f64, TruncSatTo<i64>>()
+    }
+
+    fn visit_i64_trunc_sat_f64_u(&mut self) -> Result<(), Self::Error> {
+        self.compile_un_op::<f64, TruncSatTo<u64>>()
     }
 
     /// Compiles a binary operation
@@ -2074,7 +2716,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit the instruction.
-        self.emit(select_bin_op(info, self.opd(1).kind(), self.opd(0).kind()));
+        self.emit(select_bin_op_from_info(info, self.opd(1).kind(), self.opd(0).kind()));
 
         // Emit the inputs and pop them from the stack.
         self.emit_opd(0);
@@ -2320,16 +2962,16 @@ fn select_ref_is_null(type_: RefType, kind: OpdKind) -> ThreadedInstr {
 
 fn select_select(type_: ValType, input_0: OpdKind, input_1: OpdKind, input_2: OpdKind) -> ThreadedInstr {
     match type_ {
-        ValType::I32 => select_select_typed::<i32>(input_0, input_1, input_2),
-        ValType::I64 => select_select_typed::<i64>(input_0, input_1, input_2),
-        ValType::F32 => select_select_typed::<f32>(input_0, input_1, input_2),
-        ValType::F64 => select_select_typed::<f64>(input_0, input_1, input_2),
-        ValType::FuncRef => select_select_typed::<UnguardedFuncRef>(input_0, input_1, input_2),
-        ValType::ExternRef => select_select_typed::<UnguardedExternRef>(input_0, input_1, input_2),
+        ValType::I32 => select_select_inner::<i32>(input_0, input_1, input_2),
+        ValType::I64 => select_select_inner::<i64>(input_0, input_1, input_2),
+        ValType::F32 => select_select_inner::<f32>(input_0, input_1, input_2),
+        ValType::F64 => select_select_inner::<f64>(input_0, input_1, input_2),
+        ValType::FuncRef => select_select_inner::<UnguardedFuncRef>(input_0, input_1, input_2),
+        ValType::ExternRef => select_select_inner::<UnguardedExternRef>(input_0, input_1, input_2),
     }
 }
 
-fn select_select_typed<T>(input_0: OpdKind, input_1: OpdKind, input_2: OpdKind) -> ThreadedInstr
+fn select_select_inner<T>(input_0: OpdKind, input_1: OpdKind, input_2: OpdKind) -> ThreadedInstr
 where
     T: ReadReg + WriteReg
 {
@@ -2377,16 +3019,16 @@ fn select_global_get(type_: ValType) -> ThreadedInstr {
 
 fn select_global_set(type_: ValType, input: OpdKind) -> ThreadedInstr {
     match type_ {
-        ValType::I32 => select_global_set_typed::<i32>(input),
-        ValType::I64 => select_global_set_typed::<i64>(input),
-        ValType::F32 => select_global_set_typed::<f32>(input),
-        ValType::F64 => select_global_set_typed::<f64>(input),
-        ValType::FuncRef => select_global_set_typed::<UnguardedFuncRef>(input),
-        ValType::ExternRef => select_global_set_typed::<UnguardedExternRef>(input),
+        ValType::I32 => select_global_set_inner::<i32>(input),
+        ValType::I64 => select_global_set_inner::<i64>(input),
+        ValType::F32 => select_global_set_inner::<f32>(input),
+        ValType::F64 => select_global_set_inner::<f64>(input),
+        ValType::FuncRef => select_global_set_inner::<UnguardedFuncRef>(input),
+        ValType::ExternRef => select_global_set_inner::<UnguardedExternRef>(input),
     }
 }
 
-fn select_global_set_typed<T>(input: OpdKind) -> ThreadedInstr
+fn select_global_set_inner<T>(input: OpdKind) -> ThreadedInstr
 where
     GlobalEntityT<T>: DowncastMut<GlobalEntity>,
     T: Copy + ReadReg
@@ -2400,12 +3042,12 @@ where
 
 fn select_table_get(type_: RefType, input: OpdKind) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => select_table_get_typed::<UnguardedFuncRef>(input),
-        RefType::ExternRef => select_table_get_typed::<UnguardedExternRef>(input),
+        RefType::FuncRef => select_table_get_inner::<UnguardedFuncRef>(input),
+        RefType::ExternRef => select_table_get_inner::<UnguardedExternRef>(input),
     }
 }
 
-fn select_table_get_typed<T>(input: OpdKind) -> ThreadedInstr
+fn select_table_get_inner<T>(input: OpdKind) -> ThreadedInstr
 where
     TableEntityT<T>: DowncastRef<TableEntity>,
     T: Copy + ReadReg + WriteReg
@@ -2419,12 +3061,12 @@ where
 
 fn select_table_set(type_: RefType, input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => select_table_set_typed::<UnguardedFuncRef>(input_0, input_1),
-        RefType::ExternRef => select_table_set_typed::<UnguardedExternRef>(input_0, input_1),
+        RefType::FuncRef => select_table_set_inner::<UnguardedFuncRef>(input_0, input_1),
+        RefType::ExternRef => select_table_set_inner::<UnguardedExternRef>(input_0, input_1),
     }
 }
 
-fn select_table_set_typed<T>(input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr
+fn select_table_set_inner<T>(input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr
 where
     TableEntityT<T>: DowncastMut<TableEntity>,
     T: Copy + ReadReg
@@ -2484,7 +3126,39 @@ fn select_elem_drop(type_: RefType) -> ThreadedInstr {
     }
 }
 
-fn select_un_op(info: UnOpInfo, kind: OpdKind) -> ThreadedInstr {
+fn select_un_op<T, U>(input: OpdKind) -> ThreadedInstr
+where
+    T: ReadReg,
+    U: UnOp<T>,
+    U::Output: WriteReg
+{
+    match input {
+        OpdKind::Imm => exec::un_op::<T, U, Imm, Reg>,
+        OpdKind::Stk => exec::un_op::<T, U, Stk, Reg>,
+        OpdKind::Reg => exec::un_op::<T, U, Reg, Reg>,
+    }
+}
+
+fn select_bin_op<T, B>(input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr
+where
+    T: ReadReg,
+    B: BinOp<T>,
+    B::Output: WriteReg
+{
+    match (input_0, input_1) {
+        (OpdKind::Imm, OpdKind::Imm) => exec::bin_op::<T, B, Imm, Imm, Reg>,
+        (OpdKind::Stk, OpdKind::Imm) => exec::bin_op::<T, B, Stk, Imm, Reg>,
+        (OpdKind::Reg, OpdKind::Imm) => exec::bin_op::<T, B, Reg, Imm, Reg>,
+        (OpdKind::Imm, OpdKind::Stk) => exec::bin_op::<T, B, Imm, Stk, Reg>,
+        (OpdKind::Stk, OpdKind::Stk) => exec::bin_op::<T, B, Stk, Stk, Reg>,
+        (OpdKind::Reg, OpdKind::Stk) => exec::bin_op::<T, B, Reg, Stk, Reg>,
+        (OpdKind::Imm, OpdKind::Reg) => exec::bin_op::<T, B, Imm, Reg, Reg>,
+        (OpdKind::Stk, OpdKind::Reg) => exec::bin_op::<T, B, Stk, Reg, Reg>,
+        (OpdKind::Reg, OpdKind::Reg) => exec::bin_op::<T, B, Reg, Reg, Reg>,
+    }
+}
+
+fn select_un_op_from_info(info: UnOpInfo, kind: OpdKind) -> ThreadedInstr {
     match kind {
         OpdKind::Stk => Some(info.instr_s),
         OpdKind::Reg => Some(info.instr_r),
@@ -2493,7 +3167,7 @@ fn select_un_op(info: UnOpInfo, kind: OpdKind) -> ThreadedInstr {
     .expect("no suitable instruction found")
 }
 
-fn select_bin_op(info: BinOpInfo, kind_0: OpdKind, kind_1: OpdKind) -> ThreadedInstr {
+fn select_bin_op_from_info(info: BinOpInfo, kind_0: OpdKind, kind_1: OpdKind) -> ThreadedInstr {
     match (kind_0, kind_1) {
         (OpdKind::Stk, OpdKind::Stk) => Some(info.instr_ss),
         (OpdKind::Reg, OpdKind::Stk) => Some(info.instr_rs),
