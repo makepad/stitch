@@ -1973,7 +1973,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // The cast to [`ThreadedInstr`] is necessary here, because otherwise we would emit a
         // function item instead of a function pointer.
-        self.emit(exec::memory_size as ThreadedInstr);
+        self.emit(exec::memory_size::<Stk> as ThreadedInstr);
 
         // Emit an unguarded handle to the [`Mem`].
         self.emit(mem.to_unguarded(self.store.id()));
@@ -2004,7 +2004,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // The cast to [`ThreadedInstr`] is necessary here, because otherwise we would emit a
         // function item instead of a function pointer.
-        self.emit(exec::memory_grow as ThreadedInstr);
+        self.emit(exec::memory_grow::<Stk, Stk> as ThreadedInstr);
 
         // Emit the input and pop it from the stack.
         self.emit_and_pop_opd();
@@ -2040,7 +2040,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // The cast to [`ThreadedInstr`] is necessary here, because otherwise we would emit a
         // function item instead of a function pointer.
-        self.emit(exec::memory_fill as ThreadedInstr);
+        self.emit(exec::memory_fill::<Stk, Stk, Stk> as ThreadedInstr);
 
         // Emit the inputs and pop them from the stack.
         for _ in 0..3 {
@@ -2075,7 +2075,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // The cast to [`ThreadedInstr`] is necessary here, because otherwise we would emit a
         // function item instead of a function pointer.
-        self.emit(exec::memory_copy as ThreadedInstr);
+        self.emit(exec::memory_copy::<Stk, Stk, Stk> as ThreadedInstr);
 
         // Emit the inputs and pop them from the stack.
         for _ in 0..3 {
@@ -2111,7 +2111,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // The cast to [`ThreadedInstr`] is necessary here, because otherwise we would emit a
         // function item instead of a function pointer.
-        self.emit(exec::memory_init as ThreadedInstr);
+        self.emit(exec::memory_init::<Stk, Stk, Stk> as ThreadedInstr);
 
         // Emit the inputs and pop them from the stack.
         for _ in 0..3 {

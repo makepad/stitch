@@ -1121,7 +1121,7 @@ where
     }
 }
 
-threaded_instr!(memory_size(
+pub(crate) unsafe extern "C" fn memory_size<W>(
     ip: Ip,
     sp: Sp,
     md: Md,
@@ -1130,21 +1130,27 @@ threaded_instr!(memory_size(
     sx: Sx,
     dx: Dx,
     cx: Cx,
-) -> ControlFlowBits {
-    // Read operands
-    let (mem, ip): (UnguardedMem, _) = read_imm(ip);
+) -> ControlFlowBits
+where 
+    W: Write<u32>
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        // Read operands
+        let mem: UnguardedMem = args.read_imm();
+        
+        // Perform operation
+        let size = mem.as_ref().size();
 
-    // Perform operation
-    let size = mem.as_ref().size();
+        // Write result
+        W::write(&mut args, size);
 
-    // Write result
-    let ip = write_stack(ip, sp, size);
+        // Execute next instruction
+        args.next()
+    }
+}
 
-    // Execute next instruction
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
-
-threaded_instr!(memory_grow(
+pub(crate) unsafe extern "C" fn memory_grow<R, W>(
     ip: Ip,
     sp: Sp,
     _md: Md,
@@ -1153,29 +1159,115 @@ threaded_instr!(memory_grow(
     sx: Sx,
     dx: Dx,
     cx: Cx,
-) -> ControlFlowBits {
-    // Read operands
-    let (count, ip): (u32, _) = read_stack(ip, sp);
-    let (mut mem, ip): (UnguardedMem, _) = read_imm(ip);
+) -> ControlFlowBits
+where
+    R: Read<u32>,
+    W: Write<u32>,
+{
+    let mut args = Args::from_parts(ip, sp, ptr::null_mut(), 0, ix, sx, dx, cx);
+    unsafe {
+        // Read operands
+        let count = R::read(&mut args);
+        let mut mem: UnguardedMem = args.read_imm();
 
-    // Perform operation
-    (*cx).stack.as_mut().unwrap_unchecked().set_ptr(sp);
-    let old_size = mem
-        .as_mut()
-        .grow_with_stack(count, (*cx).stack.as_mut().unwrap_unchecked())
-        .unwrap_or(u32::MAX);
-    let bytes = mem.as_mut().bytes_mut();
-    let md = bytes.as_mut_ptr();
-    let ms = bytes.len() as u32;
+        // Perform operation
+        (*args.cx).stack.as_mut().unwrap_unchecked().set_ptr(args.sp);
+        let old_size = mem
+            .as_mut()
+            .grow_with_stack(count, (*cx).stack.as_mut().unwrap_unchecked())
+            .unwrap_or(u32::MAX);
+        let bytes = mem.as_mut().bytes_mut();
+        args.md = bytes.as_mut_ptr();
+        args.ms = bytes.len() as u32;
 
-    // Write result
-    let ip = write_stack(ip, sp, old_size);
+        // Write result
+        W::write(&mut args, old_size);
+        
+        // Execute next instruction
+        args.next()
+    }
+}
 
-    // Execute next instruction
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
+pub(crate) unsafe extern "C" fn memory_fill<R0, R1, R2>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where 
+    R0: Read<u32>,
+    R1: Read<u32>,
+    R2: Read<u32>,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let count = R2::read(&mut args);
+        let val = R1::read(&mut args);
+        let idx = R0::read(&mut args);
+        let mut mem: UnguardedMem = args.read_imm();
+        r#try!(mem.as_mut().fill(idx, val as u8, count));
+        args.next()
+    }
+}
 
-threaded_instr!(memory_fill(
+pub(crate) unsafe extern "C" fn memory_copy<R0, R1, R2>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where 
+    R0: Read<u32>,
+    R1: Read<u32>,
+    R2: Read<u32>,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let count = R2::read(&mut args);
+        let src_idx = R1::read(&mut args);
+        let dst_idx = R0::read(&mut args);
+        let mut mem: UnguardedMem = args.read_imm();
+        r#try!(mem.as_mut().copy_within(dst_idx, src_idx, count));
+        args.next()
+    }
+}
+
+pub(crate) unsafe extern "C" fn memory_init<R0, R1, R2>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where 
+    R0: Read<u32>,
+    R1: Read<u32>,
+    R2: Read<u32>,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let count = R2::read(&mut args);
+        let src_idx = R1::read(&mut args);
+        let dst_idx = R0::read(&mut args);
+        let mut dst_mem: UnguardedMem = args.read_imm();
+        let src_data: UnguardedData = args.read_imm();
+        r#try!(dst_mem.as_mut().init(dst_idx, src_data.as_ref(), src_idx, count));
+        args.next()
+    }
+}
+
+pub(crate) unsafe extern "C" fn data_drop(
     ip: Ip,
     sp: Sp,
     md: Md,
@@ -1185,87 +1277,13 @@ threaded_instr!(memory_fill(
     dx: Dx,
     cx: Cx,
 ) -> ControlFlowBits {
-    // Read operands
-    let (count, ip) = read_stack(ip, sp);
-    let (val, ip): (u32, _) = read_stack(ip, sp);
-    let (idx, ip) = read_stack(ip, sp);
-    let (mut mem, ip): (UnguardedMem, _) = read_imm(ip);
-
-    // Perform operation
-    r#try!(mem.as_mut().fill(idx, val as u8, count));
-
-    // Execute next instruction
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
-
-threaded_instr!(memory_copy(
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ix: Ix,
-    sx: Sx,
-    dx: Dx,
-    cx: Cx,
-) -> ControlFlowBits {
-    // Read operands
-    let (count, ip): (u32, _) = read_stack(ip, sp);
-    let (src_idx, ip): (u32, _) = read_stack(ip, sp);
-    let (dst_idx, ip): (u32, _) = read_stack(ip, sp);
-    let (mut mem, ip): (UnguardedMem, _) = read_imm(ip);
-
-    // Perform operation
-    r#try!(mem.as_mut().copy_within(dst_idx, src_idx, count));
-
-    // Execute next instruction
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
-
-threaded_instr!(memory_init(
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ix: Ix,
-    sx: Sx,
-    dx: Dx,
-    cx: Cx,
-) -> ControlFlowBits {
-    // Read operands
-    let (count, ip): (u32, _) = read_stack(ip, sp);
-    let (src_idx, ip): (u32, _) = read_stack(ip, sp);
-    let (dst_idx, ip): (u32, _) = read_stack(ip, sp);
-    let (mut dst_mem, ip): (UnguardedMem, _) = read_imm(ip);
-    let (src_data, ip): (UnguardedData, _) = read_imm(ip);
-
-    // Perform operation
-    r#try!(dst_mem
-        .as_mut()
-        .init(dst_idx, src_data.as_ref(), src_idx, count));
-
-    // Execute next instruction
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
-
-threaded_instr!(data_drop(
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ix: Ix,
-    sx: Sx,
-    dx: Dx,
-    cx: Cx,
-) -> ControlFlowBits {
-    // Read operands
-    let (mut data, ip): (UnguardedData, _) = read_imm(ip);
-
-    // Perform operation
-    data.as_mut().drop_bytes();
-
-    // Execute next instruction
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let mut data: UnguardedData = args.read_imm();
+        data.as_mut().drop_bytes();
+        args.next()
+    }
+}
 
 // Numeric instructions
 
