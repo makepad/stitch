@@ -637,69 +637,6 @@ pub(crate) unsafe extern "C" fn call_indirect(
     }
 }
 
-// Reference instructions
-
-macro_rules! ref_is_null {
-    ($ref_is_null_s:ident, $ref_is_null_r:ident, $T:ty) => {
-        threaded_instr!($ref_is_null_s(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let (x, ip): ($T, _) = read_stack(ip, sp);
-
-            // Perform operation
-            let y = x.is_none() as u32;
-
-            // Write result
-            let (ix, sx, dx) = write_reg(ix, sx, dx, y);
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-
-        threaded_instr!($ref_is_null_r(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read operands
-            let x: $T = read_reg(ix, sx, dx);
-
-            // Perform operation
-            let y = x.is_none() as u32;
-
-            // Write result
-            let (ix, sx, dx) = write_reg(ix, sx, dx, y);
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-    };
-}
-
-ref_is_null!(
-    ref_is_null_func_ref_s,
-    ref_is_null_func_ref_r,
-    UnguardedFuncRef
-);
-ref_is_null!(
-    ref_is_null_extern_ref_s,
-    ref_is_null_extern_ref_r,
-    UnguardedExternRef
-);
-
 // Parametric instructions
 
 pub(crate) unsafe extern "C" fn select<T, R0, R1, R2, W>(
@@ -1691,18 +1628,6 @@ where
     let val = *ip.cast();
     let ip = ip.add(1);
     (val, ip)
-}
-
-/// Reads a value from the stack.
-unsafe fn read_stack<T>(ip: Ip, sp: Sp) -> (T, Ip)
-where
-    T: Copy + std::fmt::Debug,
-{
-    let (offset, ip) = read_imm(ip);
-    // The cast to `u8` is because stack offsets are premultiplied, which allows us to avoid
-    // generating a shift instruction on some platforms.
-    let x = *sp.cast::<u8>().offset(offset).cast::<T>();
-    (x, ip)
 }
 
 /// Reads a value from a register.

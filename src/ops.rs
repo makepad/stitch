@@ -1,4 +1,4 @@
-use {crate::trap::Trap, std::{marker::PhantomData, mem}};
+use {crate::trap::Trap, std::{marker::PhantomData, mem, ptr::NonNull}};
 
 pub(crate) trait UnOp<T> {
     type Output;
@@ -12,6 +12,7 @@ pub(crate) trait BinOp<T> {
     fn bin_op(x0: T, x1: T) -> Result<Self::Output, Trap>;
 }
 
+pub(crate) struct IsNull;
 pub(crate) struct Eqz;
 pub(crate) struct Ne;
 pub(crate) struct Eq;
@@ -55,6 +56,14 @@ pub(crate) struct DemoteTo<T>(PhantomData<T>);
 pub(crate) struct PromoteTo<T>(PhantomData<T>);
 pub(crate) struct ReinterpretTo<T>(PhantomData<T>);
 pub(crate) struct ExtendFrom<T>(PhantomData<T>);
+
+impl<T> UnOp<Option<NonNull<T>>> for IsNull {
+    type Output = i32;
+
+    fn un_op(x: Option<NonNull<T>>) -> Result<Self::Output, Trap> {
+        Ok((x.is_none()).into())
+    }
+}
 
 macro_rules! impl_rel_ops {
     ($($T:ty)*) => {

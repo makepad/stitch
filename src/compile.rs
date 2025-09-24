@@ -2968,15 +2968,10 @@ fn select_ref_null(type_: RefType) -> ThreadedInstr {
     }
 }
 
-fn select_ref_is_null(type_: RefType, kind: OpdKind) -> ThreadedInstr {
-    match (type_, kind) {
-        (RefType::FuncRef, OpdKind::Stk) => exec::ref_is_null_func_ref_s,
-        (RefType::FuncRef, OpdKind::Reg) => exec::ref_is_null_func_ref_r,
-
-        (RefType::ExternRef, OpdKind::Stk) => exec::ref_is_null_extern_ref_s,
-        (RefType::ExternRef, OpdKind::Reg) => exec::ref_is_null_extern_ref_r,
-
-        (_, OpdKind::Imm) => panic!("no suitable instruction found"),
+fn select_ref_is_null(type_: RefType, input: OpdKind) -> ThreadedInstr {
+    match type_ {
+        RefType::FuncRef => select_un_op::<UnguardedFuncRef, IsNull>(input),
+        RefType::ExternRef => select_un_op::<UnguardedExternRef, IsNull>(input),
     }
 }
 
