@@ -108,7 +108,7 @@ impl Compiler {
         }
 
         for (result_idx, result_type) in type_.clone().results().iter().copied().enumerate().rev() {
-            compile.emit(select_copy_stack(result_type));
+            compile.emit(select_copy(result_type, OpdKind::Stk));
             compile.emit_stack_offset(compile.temp_stack_idx(result_idx));
             compile.emit_stack_offset(compile.param_result_stack_idx(result_idx));
         }
@@ -523,7 +523,7 @@ impl<'a> Compile<'a> {
     /// Preserves an immediate operand by copying its value to the stack, if necessary.
     fn preserve_imm_opd(&mut self, opd_depth: usize) {
         let opd_idx = self.opds.len() - 1 - opd_depth;
-        self.emit(select_copy_imm_to_stack(self.opds[opd_idx].type_));
+        self.emit(select_copy(self.opds[opd_idx].type_, OpdKind::Imm));
         self.emit_val(self.opds[opd_idx].val.unwrap());
         self.emit_stack_offset(self.temp_stack_idx(opd_idx));
         self.opd_mut(opd_depth).val = None;
@@ -532,7 +532,7 @@ impl<'a> Compile<'a> {
     /// Preserve a local operand by copying the local it refers to to the stack, if necessary.
     fn preserve_local_opd(&mut self, opd_idx: usize) {
         let local_idx = self.opds[opd_idx].local_idx.unwrap();
-        self.emit(select_copy_stack(self.locals[local_idx].type_));
+        self.emit(select_copy(self.locals[local_idx].type_, OpdKind::Stk));
         self.emit_stack_offset(self.local_stack_idx(local_idx));
         self.emit_stack_offset(self.temp_stack_idx(opd_idx));
         self.remove_local_opd(opd_idx);
@@ -630,7 +630,7 @@ impl<'a> Compile<'a> {
     fn preserve_reg(&mut self, reg_idx: usize) {
         let opd_idx = self.regs[reg_idx].unwrap();
         let opd_type = self.opds[opd_idx].type_;
-        self.emit(select_copy_reg_to_stack(opd_type));
+        self.emit(select_copy(opd_type, OpdKind::Reg));
         self.emit_stack_offset(self.temp_stack_idx(opd_idx));
         self.dealloc_reg(reg_idx);
     }
@@ -655,7 +655,7 @@ impl<'a> Compile<'a> {
             .enumerate()
             .rev()
         {
-            self.emit(select_copy_stack(label_type));
+            self.emit(select_copy(label_type, OpdKind::Stk));
             self.emit_stack_offset(self.opd_stack_idx(0));
             self.pop_opd();
             self.emit_stack_offset(
@@ -1174,9 +1174,9 @@ impl<'a> InstrVisitor for Compile<'a> {
         {
             self.ensure_opd_not_imm(0);
             self.emit(if self.opd(0).is_reg {
-                select_copy_reg_to_stack(result_type)
+                select_copy(result_type, OpdKind::Reg)
             } else {
-                select_copy_stack(result_type)
+                select_copy(result_type, OpdKind::Stk)
             });
             self.emit_and_pop_opd();
             self.emit_stack_offset(self.param_result_stack_idx(result_idx));
@@ -1375,8 +1375,8 @@ impl<'a> InstrVisitor for Compile<'a> {
         let func = self.instance.func(func_idx).unwrap();
 
         // Emit the instruction.
-        self.emit(exec::copy_imm_to_stack_func_ref as ThreadedInstr);
-
+        self.emit(exec::copy::<UnguardedFuncRef, Imm, Stk> as ThreadedInstr);
+        
         // Emit an unguarded handle to the [`Func`].
         self.emit(func.to_unguarded(self.store.id()));
 
@@ -1531,7 +1531,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.preserve_local(local_idx);
 
         // Emit the instruction.
-        self.emit(selecy_copy_opd_to_stack(local_type, self.opd(0).kind()));
+        self.emit(select_copy(local_type, self.opd(0).kind()));
 
         // Emit the input.
         self.emit_opd(0);
@@ -2963,8 +2963,8 @@ fn select_br_table(kind: OpdKind) -> ThreadedInstr {
 
 fn select_ref_null(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::copy_imm_to_stack_func_ref,
-        RefType::ExternRef => exec::copy_imm_to_stack_extern_ref,
+        RefType::FuncRef => exec::copy::<UnguardedFuncRef, Imm, Stk>,
+        RefType::ExternRef => exec::copy::<UnguardedExternRef, Imm, Stk>,
     }
 }
 
@@ -3236,43 +3236,24 @@ where
     }
 }
 
-fn selecy_copy_opd_to_stack(type_: ValType, kind: OpdKind) -> ThreadedInstr {
+fn select_copy(type_: ValType, kind: OpdKind) -> ThreadedInstr {
+    match type_ {
+        ValType::I32 => select_copy_inner::<i32>(kind),
+        ValType::I64 => select_copy_inner::<i64>(kind),
+        ValType::F32 => select_copy_inner::<f32>(kind),
+        ValType::F64 => select_copy_inner::<f64>(kind),
+        ValType::FuncRef => select_copy_inner::<UnguardedFuncRef>(kind),
+        ValType::ExternRef => select_copy_inner::<UnguardedExternRef>(kind),
+    }
+}
+
+fn select_copy_inner<T>(kind: OpdKind) -> ThreadedInstr
+where
+    T: ReadReg + WriteReg
+{
     match kind {
-        OpdKind::Stk => select_copy_stack(type_),
-        OpdKind::Reg => select_copy_reg_to_stack(type_),
-        OpdKind::Imm => select_copy_imm_to_stack(type_),
-    }
-}
-
-fn select_copy_imm_to_stack(type_: ValType) -> ThreadedInstr {
-    match type_ {
-        ValType::I32 => exec::copy_imm_to_stack_i32,
-        ValType::I64 => exec::copy_imm_to_stack_i64,
-        ValType::F32 => exec::copy_imm_to_stack_f32,
-        ValType::F64 => exec::copy_imm_to_stack_f64,
-        ValType::FuncRef => exec::copy_imm_to_stack_func_ref,
-        ValType::ExternRef => exec::copy_imm_to_stack_extern_ref,
-    }
-}
-
-fn select_copy_stack(type_: ValType) -> ThreadedInstr {
-    match type_.into() {
-        ValType::I32 => exec::copy_stack_i32,
-        ValType::I64 => exec::copy_stack_i64,
-        ValType::F32 => exec::copy_stack_f32,
-        ValType::F64 => exec::copy_stack_f64,
-        ValType::FuncRef => exec::copy_stack_func_ref,
-        ValType::ExternRef => exec::copy_stack_extern_ref,
-    }
-}
-
-fn select_copy_reg_to_stack(type_: ValType) -> ThreadedInstr {
-    match type_ {
-        ValType::I32 => exec::copy_reg_to_stack_i32,
-        ValType::I64 => exec::copy_reg_to_stack_i64,
-        ValType::F32 => exec::copy_reg_to_stack_f32,
-        ValType::F64 => exec::copy_reg_to_stack_f64,
-        ValType::FuncRef => exec::copy_reg_to_stack_func_ref,
-        ValType::ExternRef => exec::copy_reg_to_stack_extern_ref,
+        OpdKind::Imm => exec::copy::<T, Imm, Stk>,
+        OpdKind::Stk => exec::copy::<T, Stk, Stk>,
+        OpdKind::Reg => exec::copy::<T, Reg, Stk>,
     }
 }

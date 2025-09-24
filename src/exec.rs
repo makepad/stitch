@@ -1339,98 +1339,27 @@ where
 
 // Miscellaneous instructions
 
-macro_rules! copy_imm_to_stack {
-    ($copy_imm_to_stack:ident, $T:ty) => {
-        threaded_instr!($copy_imm_to_stack(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read immediate value
-            let (x, ip): ($T, _) = read_imm(ip);
-
-            // Write value to stack
-            let ip = write_stack(ip, sp, x);
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-    };
+pub(crate) unsafe extern "C" fn copy<T, R, W>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where
+    R: Read<T>,
+    W: Write<T>,
+{
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let val = R::read(&mut args);
+        W::write(&mut args, val);
+        args.next()
+    }
 }
-
-copy_imm_to_stack!(copy_imm_to_stack_i32, i32);
-copy_imm_to_stack!(copy_imm_to_stack_i64, i64);
-copy_imm_to_stack!(copy_imm_to_stack_f32, f32);
-copy_imm_to_stack!(copy_imm_to_stack_f64, f64);
-copy_imm_to_stack!(copy_imm_to_stack_func_ref, UnguardedFuncRef);
-copy_imm_to_stack!(copy_imm_to_stack_extern_ref, UnguardedExternRef);
-
-macro_rules! copy_stack {
-    ($copy_stack_t:ident, $T:ty) => {
-        threaded_instr!($copy_stack_t(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read value from stack
-            let (x, ip): ($T, _) = read_stack(ip, sp);
-
-            // Write value to stack
-            let ip = write_stack(ip, sp, x);
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-    };
-}
-
-copy_stack!(copy_stack_i32, i32);
-copy_stack!(copy_stack_i64, i64);
-copy_stack!(copy_stack_f32, f32);
-copy_stack!(copy_stack_f64, f64);
-copy_stack!(copy_stack_func_ref, UnguardedFuncRef);
-copy_stack!(copy_stack_extern_ref, UnguardedExternRef);
-
-macro_rules! copy_reg_to_stack {
-    ($copy_reg_to_stack_t:ident, $T:ty) => {
-        threaded_instr!($copy_reg_to_stack_t(
-            ip: Ip,
-            sp: Sp,
-            md: Md,
-            ms: Ms,
-            ix: Ix,
-            sx: Sx,
-            dx: Dx,
-            cx: Cx,
-        ) -> ControlFlowBits {
-            // Read value from register
-            let x: $T = read_reg(ix, sx, dx);
-
-            // Write value to stack
-            let ip = write_stack(ip, sp, x);
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-        });
-    };
-}
-
-copy_reg_to_stack!(copy_reg_to_stack_i32, i32);
-copy_reg_to_stack!(copy_reg_to_stack_i64, i64);
-copy_reg_to_stack!(copy_reg_to_stack_f32, f32);
-copy_reg_to_stack!(copy_reg_to_stack_f64, f64);
-copy_reg_to_stack!(copy_reg_to_stack_func_ref, UnguardedFuncRef);
-copy_reg_to_stack!(copy_reg_to_stack_extern_ref, UnguardedExternRef);
 
 threaded_instr!(stop(
     _ip: Ip,
@@ -1774,18 +1703,6 @@ where
     // generating a shift instruction on some platforms.
     let x = *sp.cast::<u8>().offset(offset).cast::<T>();
     (x, ip)
-}
-
-/// Writes a value to the stack.
-unsafe fn write_stack<T>(ip: Ip, sp: Sp, x: T) -> Ip
-where
-    T: Copy + std::fmt::Debug,
-{
-    let (offset, ip) = read_imm(ip);
-    // The cast to `u8` is because stack offsets are premultiplied, which allows us to avoid
-    // generating a shift instruction on some platforms.
-    *sp.cast::<u8>().offset(offset).cast() = x;
-    ip
 }
 
 /// Reads a value from a register.
