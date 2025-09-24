@@ -220,7 +220,8 @@ pub(crate) fn exec(
             // Main interpreter loop
             loop {
                 match ControlFlow::from_bits(unsafe {
-                    next_instr(
+                    let instr: ThreadedInstr = ptr::read(context.ip.cast());
+                    (instr)(
                         context.ip,
                         context.sp,
                         context.md,
@@ -289,56 +290,6 @@ pub(crate) fn exec(
 
 // Helper macros
 
-/// A helper macro for defining a `ThreadedInstr` with the correct ABI.
-#[cfg(windows)]
-macro_rules! threaded_instr {
-    ($name:ident(
-        $ip:ident: Ip,
-        $sp:ident: Sp,
-        $md:ident: Md,
-        $ms:ident: Ms,
-        $ix:ident: Ix,
-        $sx:ident: Sx,
-        $dx:ident: Dx,
-        $cx:ident: Cx,
-    ) -> ControlFlowBits $body:block) => {
-        pub(crate) unsafe extern "sysv64" fn $name(
-            $ip: Ip,
-            $sp: Sp,
-            $md: Md,
-            $ms: Ms,
-            $ix: Ix,
-            $sx: Sx,
-            $dx: Dx,
-            $cx: Cx,
-        ) -> ControlFlowBits $body
-    };
-}
-#[cfg(not(windows))]
-macro_rules! threaded_instr {
-    ($name:ident(
-        $ip:ident: Ip,
-        $sp:ident: Sp,
-        $md:ident: Md,
-        $ms:ident: Ms,
-        $ix:ident: Ix,
-        $sx:ident: Sx,
-        $dx:ident: Dx,
-        $cx:ident: Cx,
-    ) -> ControlFlowBits $body:block) => {
-        pub(crate) unsafe extern "C" fn $name(
-            $ip: Ip,
-            $sp: Sp,
-            $md: Md,
-            $ms: Ms,
-            $ix: Ix,
-            $sx: Sx,
-            $dx: Dx,
-            $cx: Cx,
-        ) -> ControlFlowBits $body
-    };
-}
-
 /// A helper macro for unwrapping a result or propagating its trap.
 macro_rules! r#try {
     ($expr:expr) => {
@@ -374,8 +325,8 @@ pub(crate) unsafe extern "C" fn br(
     dx: Dx,
     cx: Cx,
 ) -> ControlFlowBits {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let target = args.read_imm();
         args.set_ip(target);
         args.next()
@@ -395,8 +346,8 @@ pub(crate) unsafe extern "C" fn br_if_z<R>(
 where
     R: Read<i32>
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let cond: i32 = R::read(&mut args);
         let target = args.read_imm();
         if cond == 0 {
@@ -421,8 +372,8 @@ pub(crate) unsafe extern "C" fn br_if_nz<R>(
 where
     R: Read<i32>
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let cond: i32 = R::read(&mut args);
         let target = args.read_imm();
         if cond != 0 {
@@ -447,8 +398,8 @@ pub(crate) unsafe extern "C" fn br_table<R>(
 where 
     R: Read<u32>
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let target_idx: u32 = R::read(&mut args);
         let target_count: u32 = args.read_imm();
         let targets: *mut Ip = args.ip().cast();
@@ -467,8 +418,8 @@ pub(crate) unsafe extern "C" fn return_(
     dx: Dx,
     cx: Cx,
 ) -> ControlFlowBits {
-    let mut args = Args::from_parts(_ip, sp, _md, _ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(_ip, sp, _md, _ms, ix, sx, dx, cx);
         // Restore call frame from stack.
         let old_sp = args.sp;
         args.set_ip(*old_sp.offset(-4).cast());
@@ -489,8 +440,8 @@ pub(crate) unsafe extern "C" fn call_wasm(
     dx: Dx,
     cx: Cx,
 ) -> ControlFlowBits {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let target = args.read_imm();
         let offset = args.read_imm();
         // Store call frame on stack.
@@ -515,8 +466,8 @@ pub(crate) unsafe extern "C" fn call_host(
     dx: Dx,
     cx: Cx,
 ) -> ControlFlowBits {
-    let mut args = Args::from_parts(ip, sp, _md, _ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, _md, _ms, ix, sx, dx, cx);
         let func: UnguardedFunc = args.read_imm();
         let offset = args.read_imm();
         let mem: Option<UnguardedMem> = args.read_imm();
@@ -561,8 +512,8 @@ pub(crate) unsafe extern "C" fn call_indirect(
     dx: Dx,
     cx: Cx,
 ) -> ControlFlowBits {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let func_idx = args.read_stk();
         let table: UnguardedTable = args.read_imm();
         let type_: UnguardedInternedFuncType = args.read_imm();
@@ -655,8 +606,8 @@ where
     R2: Read<i32>,
     W: Write<T>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let cond = R2::read(&mut args);
         let x1 = R1::read(&mut args);
         let x0 = R0::read(&mut args);
@@ -687,8 +638,8 @@ where
     T: Copy,
     W: Write<T>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let global: UnguardedGlobal = args.read_imm();
         let global = global.as_ref().downcast_ref::<T>().unwrap_unchecked();
         let val = global.get();
@@ -712,8 +663,8 @@ where
     T: Copy,
     R: Read<T>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let val = R::read(&mut args);
         let mut global: UnguardedGlobal = args.read_imm();
         let global = global.as_mut().downcast_mut::<T>().unwrap_unchecked();
@@ -740,8 +691,8 @@ where
     R: Read<u32>,
     W: Write<T>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let idx = R::read(&mut args);
         let table: UnguardedTable = args.read_imm();
         let table = table.as_ref().downcast_ref::<T>().unwrap_unchecked();
@@ -767,8 +718,8 @@ where
     R0: Read<u32>,
     R1: Read<T>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let val = R1::read(&mut args);
         let idx = R0::read(&mut args);
         let mut table: UnguardedTable = args.read_imm();
@@ -793,8 +744,8 @@ where
     T: Copy,
     W: Write<u32>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let table: UnguardedTable = args.read_imm();
         let table = table.as_ref().downcast_ref::<T>().unwrap_unchecked();
         let size = table.size();
@@ -820,8 +771,8 @@ where
     R1: Read<u32>,
     W: Write<u32>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let count = R1::read(&mut args);
         let val = R0::read(&mut args);
         let mut table: UnguardedTable = args.read_imm();
@@ -849,8 +800,8 @@ where
     R1: Read<T>,
     R2: Read<u32>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let count = R2::read(&mut args);
         let val = R1::read(&mut args);
         let idx = R0::read(&mut args);
@@ -878,8 +829,8 @@ where
     R1: Read<u32>,
     R2: Read<u32>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let count = R2::read(&mut args);
         let src_idx = R1::read(&mut args);
         let dst_idx = R0::read(&mut args);
@@ -914,8 +865,8 @@ where
     R1: Read<u32>,
     R2: Read<u32>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let count = R2::read(&mut args);
         let src_offset = R1::read(&mut args);
         let dst_offset = R0::read(&mut args);
@@ -942,8 +893,8 @@ where
     ElemEntityT<T>: DowncastMut<ElemEntity>,
     T: Copy,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let mut elem: UnguardedElem = args.read_imm();
         let elem = elem.as_mut().downcast_mut::<T>().unwrap_unchecked();
         elem.drop_elems();
@@ -968,8 +919,8 @@ where
     R: Read<u32>,
     W: Write<T>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let offset = R::read(&mut args);
         let base = args.read_imm();
         let val = r#try!(args.load(base, offset));
@@ -994,8 +945,8 @@ where
     R: Read<u32>,
     W: Write<Dst>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let offset = R::read(&mut args);
         let base = args.read_imm();
         let src: Src = r#try!(args.load(base, offset));
@@ -1020,8 +971,8 @@ where
     R1: Read<T>,
     R0: Read<u32>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let val = R1::read(&mut args);
         let offset = R0::read(&mut args);
         let base: u32 = args.read_imm();
@@ -1046,8 +997,8 @@ where
     R1: Read<Src>,
     R0: Read<u32>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let src = R1::read(&mut args);
         let offset = R0::read(&mut args);
         let base: u32 = args.read_imm();
@@ -1070,8 +1021,9 @@ pub(crate) unsafe extern "C" fn memory_size<W>(
 where 
     W: Write<u32>
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+
         // Read operands
         let mem: UnguardedMem = args.read_imm();
         
@@ -1100,8 +1052,9 @@ where
     R: Read<u32>,
     W: Write<u32>,
 {
-    let mut args = Args::from_parts(ip, sp, ptr::null_mut(), 0, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, ptr::null_mut(), 0, ix, sx, dx, cx);
+    
         // Read operands
         let count = R::read(&mut args);
         let mut mem: UnguardedMem = args.read_imm();
@@ -1139,8 +1092,8 @@ where
     R1: Read<u32>,
     R2: Read<u32>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let count = R2::read(&mut args);
         let val = R1::read(&mut args);
         let idx = R0::read(&mut args);
@@ -1165,8 +1118,8 @@ where
     R1: Read<u32>,
     R2: Read<u32>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let count = R2::read(&mut args);
         let src_idx = R1::read(&mut args);
         let dst_idx = R0::read(&mut args);
@@ -1191,8 +1144,8 @@ where
     R1: Read<u32>,
     R2: Read<u32>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let count = R2::read(&mut args);
         let src_idx = R1::read(&mut args);
         let dst_idx = R0::read(&mut args);
@@ -1213,8 +1166,8 @@ pub(crate) unsafe extern "C" fn data_drop(
     dx: Dx,
     cx: Cx,
 ) -> ControlFlowBits {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let mut data: UnguardedData = args.read_imm();
         data.as_mut().drop_bytes();
         args.next()
@@ -1238,8 +1191,8 @@ where
     R: Read<T>,
     W: Write<U::Output>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let x = R::read(&mut args);
         let y = r#try!(U::un_op(x));
         W::write(&mut args, y);
@@ -1263,8 +1216,8 @@ where
     R1: Read<T>,
     W: Write<B::Output>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let x1 = R1::read(&mut args);
         let x0 = R0::read(&mut args);
         let y = r#try!(B::bin_op(x0, x1));
@@ -1289,8 +1242,8 @@ where
     R: Read<T>,
     W: Write<T>,
 {
-    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let val = R::read(&mut args);
         W::write(&mut args, val);
         args.next()
@@ -1310,7 +1263,7 @@ pub(crate) unsafe extern "C" fn stop(
     ControlFlow::Stop.to_bits()
 }
 
-threaded_instr!(compile(
+pub(crate) unsafe extern "C" fn compile(
     ip: Ip,
     sp: Sp,
     md: Md,
@@ -1320,19 +1273,22 @@ threaded_instr!(compile(
     dx: Dx,
     cx: Cx,
 ) -> ControlFlowBits {
-    let mut func: UnguardedFunc = *ip.cast();
-    Func(Handle::from_unguarded(func, (*(*cx).store).id())).compile((*cx).store);
-    let FuncEntity::Wasm(func) = func.as_mut() else {
-        hint::unreachable_unchecked();
-    };
-    let Code::Compiled(state) = func.code_mut() else {
-        hint::unreachable_unchecked();
-    };
-    *ip.cast() = state.code.as_mut_ptr();
-    let ip = ip.offset(-1);
-    *ip.cast() = call_wasm as ThreadedInstr;
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
+    unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+        let mut func = ptr::read(args.ip().cast());
+        Func(Handle::from_unguarded(func, (*(*cx).store).id())).compile((*cx).store);
+        let FuncEntity::Wasm(func) = func.as_mut() else {
+            hint::unreachable_unchecked();
+        };
+        let Code::Compiled(state) = func.code_mut() else {
+            hint::unreachable_unchecked();
+        };
+        ptr::write(args.ip().cast(), state.code.as_mut_ptr());
+        args.reset_ip();
+        ptr::write(args.ip().cast(), call_wasm as ThreadedInstr);
+        args.next()
+    }
+}
 
 pub(crate) unsafe extern "C" fn enter(
     ip: Ip,
@@ -1344,8 +1300,8 @@ pub(crate) unsafe extern "C" fn enter(
     dx: Dx,
     cx: Cx,
 ) -> ControlFlowBits {
-    let mut args = Args::from_parts(ip, sp, ptr::null_mut(), 0, ix, sx, dx, cx);
     unsafe {
+        let mut args = Args::from_parts(ip, sp, ptr::null_mut(), 0, ix, sx, dx, cx);
         let func: UnguardedFunc = args.read_imm();
         let mem: Option<UnguardedMem> = args.read_imm();
         let FuncEntity::Wasm(func) = func.as_ref() else {
@@ -1393,7 +1349,7 @@ pub(crate) struct Args<'a> {
 }
 
 impl<'a> Args<'a> {
-    fn from_parts(
+    unsafe fn from_parts(
         ip: Ip,
         sp: Sp,
         md: Md,
@@ -1403,7 +1359,7 @@ impl<'a> Args<'a> {
         dx: Dx,
         cx: Cx<'a>,
     ) -> Self {
-        Self {
+        let mut args = Self {
             ip_base: ip,
             ip_offset: 0,
             sp,
@@ -1413,7 +1369,9 @@ impl<'a> Args<'a> {
             sx,
             dx,
             cx,
-        }
+        };
+        args.advance_ip(1);
+        args
     }
 
     fn into_parts(self) -> (Ip, Sp, Md, Ms, Ix, Sx, Dx, Cx<'a>) {
@@ -1435,6 +1393,10 @@ impl<'a> Args<'a> {
 
     unsafe fn advance_ip(&mut self, count: usize) {
         self.ip_offset += count;
+    }
+
+    unsafe fn reset_ip(&mut self) {
+        self.ip_offset = 0;
     }
 
     fn set_ip(&mut self, ip: Ip) {
@@ -1505,9 +1467,9 @@ impl<'a> Args<'a> {
         unsafe { Ok(val.write_to_ptr(self.md.add(start as usize).cast())) }
     }
     
-    unsafe fn next(mut self) -> ControlFlowBits {
+    unsafe fn next(self) -> ControlFlowBits {
         unsafe {
-            let instr: ThreadedInstr = self.read_imm();
+            let instr: ThreadedInstr = *self.ip().cast();
             let (ip, sp, md, ms, ix, sx, dx, cx) = self.into_parts();
             (instr)(ip, sp, md, ms, ix, sx, dx, cx)
         }
@@ -1604,31 +1566,6 @@ macro_rules! impl_write_to_ptr {
 }
 
 impl_write_to_ptr! { i8, u8, i16, u16, i32, u32, i64, u64, f32, f64 }
-
-/// Executes the next instruction.
-pub(crate) unsafe fn next_instr(
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ix: Ix,
-    sx: Sx,
-    dx: Dx,
-    cx: Cx,
-) -> ControlFlowBits {
-    let (instr, ip): (ThreadedInstr, _) = read_imm(ip);
-    (instr)(ip, sp, md, ms, ix, sx, dx, cx)
-}
-
-/// Reads an immediate value.
-unsafe fn read_imm<T>(ip: Ip) -> (T, Ip)
-where
-    T: Copy,
-{
-    let val = *ip.cast();
-    let ip = ip.add(1);
-    (val, ip)
-}
 
 /// Reads a value from a register.
 fn read_reg<T>(ix: Ix, sx: Sx, dx: Dx) -> T
