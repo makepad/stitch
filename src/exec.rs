@@ -351,7 +351,7 @@ macro_rules! r#try {
 
 // Control instructions
 
-threaded_instr!(unreachable(
+pub(crate) unsafe extern "C" fn unreachable(
     _ip: Ip,
     _sp: Sp,
     _md: Md,
@@ -362,7 +362,7 @@ threaded_instr!(unreachable(
     _cx: Cx,
 ) -> ControlFlowBits {
     ControlFlow::Trap(Trap::Unreachable).to_bits()
-});
+}
 
 pub(crate) unsafe extern "C" fn br(
     ip: Ip,
@@ -457,7 +457,7 @@ where
     }
 }
 
-threaded_instr!(return_(
+pub(crate) unsafe extern "C" fn return_(
     _ip: Ip,
     sp: Sp,
     _md: Md,
@@ -467,18 +467,19 @@ threaded_instr!(return_(
     dx: Dx,
     cx: Cx,
 ) -> ControlFlowBits {
-    // Restore call frame from stack.
-    let old_sp = sp;
-    let ip = *old_sp.offset(-4).cast();
-    let sp = *old_sp.offset(-3).cast();
-    let md = *old_sp.offset(-2).cast();
-    let ms = *old_sp.offset(-1).cast();
+    let mut args = Args::from_parts(_ip, sp, _md, _ms, ix, sx, dx, cx);
+    unsafe {
+        // Restore call frame from stack.
+        let old_sp = args.sp;
+        args.set_ip(*old_sp.offset(-4).cast());
+        args.sp = *old_sp.offset(-3).cast();
+        args.md = *old_sp.offset(-2).cast();
+        args.ms = *old_sp.offset(-1).cast();
+        args.next()
+    }
+}
 
-    // Execute next instruction.
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
-
-threaded_instr!(call_wasm(
+pub(crate) unsafe extern "C" fn call_wasm(
     ip: Ip,
     sp: Sp,
     md: Md,
@@ -488,26 +489,23 @@ threaded_instr!(call_wasm(
     dx: Dx,
     cx: Cx,
 ) -> ControlFlowBits {
-    // Read operands.
-    let (target, ip) = read_imm(ip);
-    let (offset, ip) = read_imm(ip);
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let target = args.read_imm();
+        let offset = args.read_imm();
+        // Store call frame on stack.
+        let new_sp: Sp = sp.cast::<u8>().add(offset).cast();
+        *new_sp.offset(-4).cast() = args.ip();
+        *new_sp.offset(-3).cast() = args.sp;
+        *new_sp.offset(-2).cast() = args.md;
+        *new_sp.offset(-1).cast() = args.ms;
+        args.set_ip(target);
+        args.sp = new_sp;
+        args.next()
+    }
+}
 
-    // Store call frame on stack.
-    let new_sp: Sp = sp.cast::<u8>().add(offset).cast();
-    *new_sp.offset(-4).cast() = ip;
-    *new_sp.offset(-3).cast() = sp;
-    *new_sp.offset(-2).cast() = md;
-    *new_sp.offset(-1).cast() = ms;
-
-    // Update stack pointer and branch to target.
-    let ip = target;
-    let sp = new_sp;
-
-    // Execute next instruction.
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
-
-threaded_instr!(call_host(
+pub(crate) unsafe extern "C" fn call_host(
     ip: Ip,
     sp: Sp,
     _md: Md,
@@ -517,43 +515,43 @@ threaded_instr!(call_host(
     dx: Dx,
     cx: Cx,
 ) -> ControlFlowBits {
-    // Read operands
-    let (func, ip): (UnguardedFunc, _) = read_imm(ip);
-    let (offset, ip) = read_imm(ip);
-    let (mem, ip): (Option<UnguardedMem>, _) = read_imm(ip);
+    let mut args = Args::from_parts(ip, sp, _md, _ms, ix, sx, dx, cx);
+    unsafe {
+        let func: UnguardedFunc = args.read_imm();
+        let offset = args.read_imm();
+        let mem: Option<UnguardedMem> = args.read_imm();
 
-    let mut stack = (*cx).stack.take().unwrap_unchecked();
-    stack.set_ptr(sp.cast::<u8>().add(offset).cast());
-    let FuncEntity::Host(func) = func.as_ref() else {
-        hint::unreachable_unchecked();
-    };
-    let stack = match func.trampoline().clone().call((*cx).store, stack) {
-        Ok(stack) => stack,
-        Err(error) => {
-            (*cx).error = Some(error);
-            return ControlFlow::Error.to_bits();
+        let mut stack = (*args.cx).stack.take().unwrap_unchecked();
+        stack.set_ptr(args.sp.cast::<u8>().add(offset).cast());
+        let FuncEntity::Host(func) = func.as_ref() else {
+            hint::unreachable_unchecked();
+        };
+        let stack = match func.trampoline().clone().call((*args.cx).store, stack) {
+            Ok(stack) => stack,
+            Err(error) => {
+                (*args.cx).error = Some(error);
+                return ControlFlow::Error.to_bits();
+            }
+        };
+        (*args.cx).stack = Some(stack);
+
+        // If the host function called `memory.grow`, `md` and `ms` are out of date. To ensure that `md`
+        // and `ms` are up to date, we reset them here.
+        if let Some(mut mem) = mem {
+            let data = mem.as_mut().bytes_mut();
+            args.md = data.as_mut_ptr();
+            args.ms = data.len() as u32;
+        } else {
+            args.md = ptr::null_mut();
+            args.ms = 0;
         }
-    };
-    (*cx).stack = Some(stack);
-
-    // If the host function called `memory.grow`, `md` and `ms` are out of date. To ensure that `md`
-    // and `ms` are up to date, we reset them here.
-    let md;
-    let ms;
-    if let Some(mut mem) = mem {
-        let data = mem.as_mut().bytes_mut();
-        md = data.as_mut_ptr();
-        ms = data.len() as u32;
-    } else {
-        md = ptr::null_mut();
-        ms = 0;
+        
+        // Execute next instruction
+        args.next()
     }
+}
 
-    // Execute next instruction
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
-
-threaded_instr!(call_indirect(
+pub(crate) unsafe extern "C" fn call_indirect(
     ip: Ip,
     sp: Sp,
     md: Md,
@@ -563,80 +561,81 @@ threaded_instr!(call_indirect(
     dx: Dx,
     cx: Cx,
 ) -> ControlFlowBits {
-    // Read operands
-    let (func_idx, ip): (u32, _) = read_stack(ip, sp);
-    let (table, ip): (UnguardedTable, _) = read_imm(ip);
-    let (type_, ip): (UnguardedInternedFuncType, _) = read_imm(ip);
-    let (stack_offset, ip) = read_imm(ip);
-    let (mem, ip): (Option<UnguardedMem>, _) = read_imm(ip);
+    let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+    unsafe {
+        let func_idx = args.read_stk();
+        let table: UnguardedTable = args.read_imm();
+        let type_: UnguardedInternedFuncType = args.read_imm();
+        let stack_offset = args.read_imm();
+        let mem: Option<UnguardedMem> = args.read_imm();
 
-    let func = r#try!(table
-        .as_ref()
-        .downcast_ref::<UnguardedFuncRef>()
-        .unwrap_unchecked()
-        .get(func_idx)
-        .ok_or(Trap::TableAccessOutOfBounds));
-    let mut func = r#try!(func.ok_or(Trap::ElemUninited));
-    if func
-        .as_ref()
-        .type_()
-        .to_unguarded((*(*cx).store).id())
-        != type_
-    {
-        return ControlFlow::Trap(Trap::TypeMismatch).to_bits();
-    }
-    Func(Handle::from_unguarded(func, (*(*cx).store).id())).compile(&mut *(*cx).store);
-    match func.as_mut() {
-        FuncEntity::Wasm(func) => {
-            let Code::Compiled(code) = func.code_mut() else {
-                hint::unreachable_unchecked();
-            };
-            let target = code.code.as_mut_ptr();
-
-            // Store call frame on stack.
-            let new_sp: Sp = sp.cast::<u8>().add(stack_offset).cast();
-            *new_sp.offset(-4).cast() = ip;
-            *new_sp.offset(-3).cast() = sp;
-            *new_sp.offset(-2).cast() = md;
-            *new_sp.offset(-1).cast() = ms;
-
-            // Update stack pointer and branch to target.
-            let ip = target;
-            let sp = new_sp;
-
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
+        let func = r#try!(table
+            .as_ref()
+            .downcast_ref::<UnguardedFuncRef>()
+            .unwrap_unchecked()
+            .get(func_idx)
+            .ok_or(Trap::TableAccessOutOfBounds));
+        let mut func = r#try!(func.ok_or(Trap::ElemUninited));
+        if func
+            .as_ref()
+            .type_()
+            .to_unguarded((*(*cx).store).id())
+            != type_
+        {
+            return ControlFlow::Trap(Trap::TypeMismatch).to_bits();
         }
-        FuncEntity::Host(func) => {
-            let mut stack = (*cx).stack.take().unwrap_unchecked();
-            stack.set_ptr(sp.cast::<u8>().add(stack_offset).cast());
-            let stack = match func.trampoline().clone().call((*cx).store, stack) {
-                Ok(stack) => stack,
-                Err(error) => {
-                    (*cx).error = Some(error);
-                    return ControlFlow::Error.to_bits();
-                }
-            };
-            (*cx).stack = Some(stack);
+        let id = (*(*args.cx).store).id();
+        Func(Handle::from_unguarded(func, id)).compile(&mut *(*args.cx).store);
+        match func.as_mut() {
+            FuncEntity::Wasm(func) => {
+                let Code::Compiled(code) = func.code_mut() else {
+                    hint::unreachable_unchecked();
+                };
+                let target = code.code.as_mut_ptr();
 
-            // If the host function called `memory.grow`, `md` and `ms` are out of date. To ensure
-            // that `md` and `ms` are up to date, we reset them here.
-            let md;
-            let ms;
-            if let Some(mut mem) = mem {
-                let data = mem.as_mut().bytes_mut();
-                md = data.as_mut_ptr();
-                ms = data.len() as u32;
-            } else {
-                md = ptr::null_mut();
-                ms = 0;
+                // Store call frame on stack.
+                let new_sp: Sp = args.sp.cast::<u8>().add(stack_offset).cast();
+                *new_sp.offset(-4).cast() = args.ip();
+                *new_sp.offset(-3).cast() = args.sp;
+                *new_sp.offset(-2).cast() = args.md;
+                *new_sp.offset(-1).cast() = args.ms;
+
+                // Update stack pointer and branch to target.
+                args.set_ip(target);
+                args.sp = new_sp;
+                
+                // Execute next instruction
+                args.next()
             }
+            FuncEntity::Host(func) => {
+                let mut stack = (*args.cx).stack.take().unwrap_unchecked();
+                stack.set_ptr(args.sp.cast::<u8>().add(stack_offset).cast());
+                let stack = match func.trampoline().clone().call((*args.cx).store, stack) {
+                    Ok(stack) => stack,
+                    Err(error) => {
+                        (*cx).error = Some(error);
+                        return ControlFlow::Error.to_bits();
+                    }
+                };
+                (*args.cx).stack = Some(stack);
 
-            // Execute next instruction
-            next_instr(ip, sp, md, ms, ix, sx, dx, cx)
+                // If the host function called `memory.grow`, `md` and `ms` are out of date. To ensure
+                // that `md` and `ms` are up to date, we reset them here.
+                if let Some(mut mem) = mem {
+                    let data = mem.as_mut().bytes_mut();
+                    args.md = data.as_mut_ptr();
+                    args.ms = data.len() as u32;
+                } else {
+                    args.md = ptr::null_mut();
+                    args.ms = 0;
+                }
+
+                // Execute next instruction
+                args.next()
+            }
         }
     }
-});
+}
 
 // Reference instructions
 
@@ -1361,7 +1360,7 @@ where
     }
 }
 
-threaded_instr!(stop(
+pub(crate) unsafe extern "C" fn stop(
     _ip: Ip,
     _sp: Sp,
     _md: Md,
@@ -1372,7 +1371,7 @@ threaded_instr!(stop(
     _cx: Cx,
 ) -> ControlFlowBits {
     ControlFlow::Stop.to_bits()
-});
+}
 
 threaded_instr!(compile(
     ip: Ip,
@@ -1398,7 +1397,7 @@ threaded_instr!(compile(
     next_instr(ip, sp, md, ms, ix, sx, dx, cx)
 });
 
-threaded_instr!(enter(
+pub(crate) unsafe extern "C" fn enter(
     ip: Ip,
     sp: Sp,
     _md: Md,
@@ -1408,38 +1407,39 @@ threaded_instr!(enter(
     dx: Dx,
     cx: Cx,
 ) -> ControlFlowBits {
-    let (func, ip): (UnguardedFunc, _) = read_imm(ip);
-    let (mem, ip): (Option<UnguardedMem>, _) = read_imm(ip);
-    let FuncEntity::Wasm(func) = func.as_ref() else {
-        hint::unreachable_unchecked();
-    };
-    let Code::Compiled(code) = func.code() else {
-        hint::unreachable_unchecked();
-    };
+    let mut args = Args::from_parts(ip, sp, ptr::null_mut(), 0, ix, sx, dx, cx);
+    unsafe {
+        let func: UnguardedFunc = args.read_imm();
+        let mem: Option<UnguardedMem> = args.read_imm();
+        let FuncEntity::Wasm(func) = func.as_ref() else {
+            hint::unreachable_unchecked();
+        };
+        let Code::Compiled(code) = func.code() else {
+            hint::unreachable_unchecked();
+        };
 
-    // Check that the stack has enough space.
-    let stack_height = sp.offset_from((*cx).stack.as_mut().unwrap_unchecked().base_ptr()) as usize;
-    if code.max_stack_height > Stack::SIZE - stack_height {
-        return ControlFlow::Trap(Trap::StackOverflow).to_bits();
+        // Check that the stack has enough space.
+        let stack_height = args.sp.offset_from((*args.cx).stack.as_mut().unwrap_unchecked().base_ptr()) as usize;
+        if code.max_stack_height > Stack::SIZE - stack_height {
+            return ControlFlow::Trap(Trap::StackOverflow).to_bits();
+        }
+
+        // Initialize the locals for this function to their default values.
+        ptr::write_bytes(args.sp, 0, code.local_count);
+
+        if let Some(mut mem) = mem {
+            let data = mem.as_mut().bytes_mut();
+            args.md = data.as_mut_ptr();
+            args.ms = data.len() as u32;
+        } else {
+            args.md = ptr::null_mut();
+            args.ms = 0;
+        }
+
+        // Execute the next instruction.
+        args.next()
     }
-
-    // Initialize the locals for this function to their default values.
-    ptr::write_bytes(sp, 0, code.local_count);
-
-    let md;
-    let ms;
-    if let Some(mut mem) = mem {
-        let data = mem.as_mut().bytes_mut();
-        md = data.as_mut_ptr();
-        ms = data.len() as u32;
-    } else {
-        md = ptr::null_mut();
-        ms = 0;
-    }
-
-    // Execute the next instruction.
-    next_instr(ip, sp, md, ms, ix, sx, dx, cx)
-});
+}
 
 // Helper functions
 
