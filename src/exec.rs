@@ -70,7 +70,7 @@ pub(crate) type ThreadedInstr = unsafe extern "sysv64" fn(
 // Virtual registers
 
 /// The instruction pointer register (`Ip`) stores a pointer to the current instruction.
-pub(crate) type Ip = *mut InstrSlot;
+pub(crate) type Ip = *mut u8;
 
 /// The stack pointer register (`Sp`) stores a pointer to the end of the current call frame.
 pub(crate) type Sp = *mut StackSlot;
@@ -205,7 +205,7 @@ pub(crate) fn exec(
 
             // Create an execution context.
             let mut context = Context {
-                ip: trampoline.as_mut_ptr(),
+                ip: trampoline.as_mut_ptr() as *mut u8,
                 sp: stack.ptr(),
                 md: ptr::null_mut(),
                 ms: 0,
@@ -542,7 +542,7 @@ pub(crate) unsafe extern "C" fn call_indirect(
                 let Code::Compiled(code) = func.code_mut() else {
                     hint::unreachable_unchecked();
                 };
-                let target = code.code.as_mut_ptr();
+                let target = code.code.as_mut_ptr() as *mut u8;
 
                 // Store call frame on stack.
                 let new_sp: Sp = args.sp.cast::<u8>().add(stack_offset).cast();
@@ -1370,7 +1370,7 @@ impl<'a> Args<'a> {
             dx,
             cx,
         };
-        args.advance_ip(1);
+        args.advance_ip(size_of::<InstrSlot>());
         args
     }
 
@@ -1405,9 +1405,10 @@ impl<'a> Args<'a> {
     }
 
     unsafe fn read_imm<T>(&mut self) -> T {
+        debug_assert!(size_of::<T>() <= size_of::<InstrSlot>());
         unsafe {
             let val = ptr::read(self.ip().cast());
-            self.advance_ip(1);
+            self.advance_ip(size_of::<InstrSlot>());
             val
         }
     }
