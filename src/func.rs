@@ -1,6 +1,6 @@
 use {
     crate::{
-        aliasable_box::AliasableBox,
+        code::Code,
         decode::{Decode, DecodeError, Decoder},
         error::Error,
         exec,
@@ -309,7 +309,7 @@ impl Decode for UncompiledFuncBody {
 pub(crate) struct CompiledFuncBody {
     pub(crate) max_stack_height: usize,
     pub(crate) local_count: usize,
-    pub(crate) code: AliasableBox<[InstrSlot]>,
+    pub(crate) code: Code,
 }
 
 pub(crate) type InstrSlot = usize;

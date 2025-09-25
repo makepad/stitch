@@ -1,7 +1,8 @@
 use {
     crate::{
-        aliasable_box::AliasableBox,
         cast::{ExtendingCast, ExtendingCastFrom, WrappingCast, WrappingCastFrom},
+        code,
+        code::CodeBuilder,
         instr,
         instr::{
             BlockType, InstrVisitor, MemArg,
@@ -22,7 +23,7 @@ use {
         table::{TableEntity, TableEntityT},
         val::{UnguardedVal, ValType, ValTypeOf},
     },
-    std::{mem, ops::Deref},
+    std::{mem, ops::Deref, ptr},
 };
 
 #[derive(Clone, Debug)]
@@ -31,7 +32,7 @@ pub(crate) struct Compiler {
     locals: Vec<Local>,
     blocks: Vec<Block>,
     opds: Vec<Opd>,
-    fixup_idxs: Vec<usize>,
+    fixup_offsets: Vec<usize>,
 }
 
 impl Compiler {
@@ -41,7 +42,7 @@ impl Compiler {
             locals: Vec::new(),
             blocks: Vec::new(),
             opds: Vec::new(),
-            fixup_idxs: Vec::new(),
+            fixup_offsets: Vec::new(),
         }
     }
 
@@ -57,7 +58,7 @@ impl Compiler {
         self.locals.clear();
         self.blocks.clear();
         self.opds.clear();
-        self.fixup_idxs.clear();
+        self.fixup_offsets.clear();
 
         let type_ = func.type_(store);
         let locals = &mut self.locals;
@@ -81,19 +82,19 @@ impl Compiler {
             locals,
             blocks: &mut self.blocks,
             opds: &mut self.opds,
-            fixup_idxs: &mut self.fixup_idxs,
+            fixup_offsets: &mut self.fixup_offsets,
             first_param_result_stack_idx: -(type_.call_frame_size() as isize),
             first_temp_stack_idx: local_count,
             max_stack_height: local_count,
             regs: [None; 2],
-            code: Vec::new(),
+            code: CodeBuilder::new(),
         };
         compile.push_block(
             BlockKind::Block,
             FuncType::new([], type_.results().iter().copied()),
         );
 
-        compile.emit(exec::enter as ThreadedInstr);
+        compile.emit_instr(exec::enter as ThreadedInstr);
         compile.emit(func.to_unguarded(store.id()));
         compile.emit(
             compile
@@ -108,15 +109,20 @@ impl Compiler {
         }
 
         for (result_idx, result_type) in type_.clone().results().iter().copied().enumerate().rev() {
-            compile.emit(select_copy(result_type, OpdKind::Stk));
+            compile.emit_instr(select_copy(result_type, OpdKind::Stk));
             compile.emit_stack_offset(compile.temp_stack_idx(result_idx));
             compile.emit_stack_offset(compile.param_result_stack_idx(result_idx));
         }
-        compile.emit(exec::return_ as ThreadedInstr);
+        compile.emit_instr(exec::return_ as ThreadedInstr);
 
-        let mut code: AliasableBox<[InstrSlot]> = AliasableBox::from_box(Box::from(compile.code));
-        for fixup_idx in compile.fixup_idxs.drain(..) {
-            code[fixup_idx] += code.as_ptr() as usize;
+        let mut code = compile.code.finish();
+        for fixup_offset in compile.fixup_offsets.drain(..) {
+            unsafe {
+                let fixup_ptr = code.as_mut_ptr().add(fixup_offset);
+                let instr_offset = ptr::read(fixup_ptr.cast());
+                let instr_ptr = code.as_mut_ptr().add(instr_offset);
+                ptr::write(fixup_ptr.cast(), instr_ptr);
+            }
         }
 
         CompiledFuncBody {
@@ -141,12 +147,12 @@ struct Compile<'a> {
     locals: &'a mut [Local],
     blocks: &'a mut Vec<Block>,
     opds: &'a mut Vec<Opd>,
-    fixup_idxs: &'a mut Vec<usize>,
+    fixup_offsets: &'a mut Vec<usize>,
     first_param_result_stack_idx: isize,
     first_temp_stack_idx: usize,
     max_stack_height: usize,
     regs: [Option<usize>; 2],
-    code: Vec<InstrSlot>,
+    code: CodeBuilder
 }
 
 impl<'a> Compile<'a> {
@@ -195,7 +201,7 @@ impl<'a> Compile<'a> {
         }
 
         // Emit the instruction.
-        self.emit(load);
+        self.emit_instr(load);
 
         // Emit and pop the inputs from the stack.
         self.emit_opd(0);
@@ -239,7 +245,7 @@ impl<'a> Compile<'a> {
 
     fn compile_store_inner(&mut self, arg: MemArg, store: ThreadedInstr) -> Result<(), DecodeError> {
         // Emit the instruction.
-        self.emit(store);
+        self.emit_instr(store);
 
         // Emit the inputs and pop them from the stack.
         self.emit_opd(0);
@@ -284,7 +290,7 @@ impl<'a> Compile<'a> {
         }
 
         // Emit the instruction.
-        self.emit(un_op);
+        self.emit_instr(un_op);
 
         // Emit and pop the inputs from the stack.
         self.emit_opd(0);
@@ -334,7 +340,7 @@ impl<'a> Compile<'a> {
         }
 
         // Emit the instruction.
-        self.emit(bin_op);
+        self.emit_instr(bin_op);
 
         // Emit the inputs and pop them from the stack.
         self.emit_opd(0);
@@ -432,24 +438,28 @@ impl<'a> Compile<'a> {
     }
 
     /// Pushes the hole with the given index onto the block with the given index.
-    fn push_hole(&mut self, block_idx: usize, hole_idx: usize) {
-        // We use the hole itself to store the index of the next hole. The value `usize::MAX` is
-        // used to indicate the absence of a next hole.
-        self.code[hole_idx] = self.block(block_idx).first_hole_idx.unwrap_or(usize::MAX);
-        self.block_mut(block_idx).first_hole_idx = Some(hole_idx);
+    fn push_hole(&mut self, block_idx: usize, hole_offset: usize) {
+        let first_hole_offset = self.block(block_idx).first_hole_offset;
+        let first_hole_offset = first_hole_offset.unwrap_or(usize::MAX);
+        unsafe {
+            ptr::write(self.code.as_mut_ptr().add(hole_offset).cast(), first_hole_offset)
+        }
+        self.block_mut(block_idx).first_hole_offset = Some(hole_offset);
     }
 
     /// Pops a hole from the block with the given index.
     fn pop_hole(&mut self, block_idx: usize) -> Option<usize> {
-        if let Some(hole_idx) = self.block(block_idx).first_hole_idx {
-            // We use the hole itself to store the index of the next hole. The value `usize::MAX` is
-            // used to indicate the absence of a next hole.
-            self.block_mut(block_idx).first_hole_idx = if self.code[hole_idx] == usize::MAX {
+        if let Some(hole_offset) = self.block(block_idx).first_hole_offset {
+            let next_hole_offset = unsafe {
+                ptr::read(self.code.as_ptr().add(hole_offset).cast())
+            };
+            let next_hole_offset = if next_hole_offset == usize::MAX {
                 None
             } else {
-                Some(self.code[hole_idx])
+                Some(next_hole_offset)
             };
-            Some(hole_idx)
+            self.block_mut(block_idx).first_hole_offset = next_hole_offset;
+            Some(hole_offset)
         } else {
             None
         }
@@ -457,14 +467,16 @@ impl<'a> Compile<'a> {
 
     /// Pushes a block with the given kind and type on stack.
     fn push_block(&mut self, kind: BlockKind, type_: FuncType) {
+        self.code.pad_to_align(code::ALIGN);
+
         self.blocks.push(Block {
             kind,
             type_,
             is_unreachable: false,
             height: self.opds.len(),
-            first_instr_idx: self.code.len(),
-            first_hole_idx: None,
-            else_hole_idx: None,
+            first_instr_offset: self.code.len(),
+            first_hole_offset: None,
+            else_hole_offset: None,
         });
 
         // Push the inputs of the block on the stack.
@@ -523,7 +535,7 @@ impl<'a> Compile<'a> {
     /// Preserves an immediate operand by copying its value to the stack, if necessary.
     fn preserve_imm_opd(&mut self, opd_depth: usize) {
         let opd_idx = self.opds.len() - 1 - opd_depth;
-        self.emit(select_copy(self.opds[opd_idx].type_, OpdKind::Imm));
+        self.emit_instr(select_copy(self.opds[opd_idx].type_, OpdKind::Imm));
         self.emit_val(self.opds[opd_idx].val.unwrap());
         self.emit_stack_offset(self.temp_stack_idx(opd_idx));
         self.opd_mut(opd_depth).val = None;
@@ -532,7 +544,7 @@ impl<'a> Compile<'a> {
     /// Preserve a local operand by copying the local it refers to to the stack, if necessary.
     fn preserve_local_opd(&mut self, opd_idx: usize) {
         let local_idx = self.opds[opd_idx].local_idx.unwrap();
-        self.emit(select_copy(self.locals[local_idx].type_, OpdKind::Stk));
+        self.emit_instr(select_copy(self.locals[local_idx].type_, OpdKind::Stk));
         self.emit_stack_offset(self.local_stack_idx(local_idx));
         self.emit_stack_offset(self.temp_stack_idx(opd_idx));
         self.remove_local_opd(opd_idx);
@@ -630,7 +642,7 @@ impl<'a> Compile<'a> {
     fn preserve_reg(&mut self, reg_idx: usize) {
         let opd_idx = self.regs[reg_idx].unwrap();
         let opd_type = self.opds[opd_idx].type_;
-        self.emit(select_copy(opd_type, OpdKind::Reg));
+        self.emit_instr(select_copy(opd_type, OpdKind::Reg));
         self.emit_stack_offset(self.temp_stack_idx(opd_idx));
         self.dealloc_reg(reg_idx);
     }
@@ -655,7 +667,7 @@ impl<'a> Compile<'a> {
             .enumerate()
             .rev()
         {
-            self.emit(select_copy(label_type, OpdKind::Stk));
+            self.emit_instr(select_copy(label_type, OpdKind::Stk));
             self.emit_stack_offset(self.opd_stack_idx(0));
             self.pop_opd();
             self.emit_stack_offset(
@@ -672,8 +684,15 @@ impl<'a> Compile<'a> {
         T: Copy,
     {
         debug_assert!(mem::size_of::<T>() <= mem::size_of::<InstrSlot>());
-        self.code.push(InstrSlot::default());
-        unsafe { *(self.code.last_mut().unwrap() as *mut _ as *mut T) = val };
+        self.code.push(val);
+        self.code.pad_to_align(code::ALIGN);
+    }
+
+    fn emit_instr(&mut self, instr: ThreadedInstr) {
+        self.code.pad_to_align(code::ALIGN);
+        unsafe {
+            self.code.push_aligned(instr);
+        }
     }
 
     // Emits an operand.
@@ -705,7 +724,7 @@ impl<'a> Compile<'a> {
 
     /// Emits the offset of the stack slot with the given index.
     fn emit_stack_offset(&mut self, stack_idx: isize) {
-        self.emit(stack_idx * mem::size_of::<StackSlot>() as isize);
+        self.emit(stack_idx as i32 * mem::size_of::<StackSlot>() as i32);
     }
 
     /// Emits the label for the block with the given index.
@@ -716,11 +735,11 @@ impl<'a> Compile<'a> {
     fn emit_label(&mut self, block_idx: usize) {
         match self.block(block_idx).kind {
             BlockKind::Block => {
-                let hole_idx = self.emit_hole();
-                self.push_hole(block_idx, hole_idx);
+                let hole_offset = self.emit_hole();
+                self.push_hole(block_idx, hole_offset);
             }
             BlockKind::Loop => {
-                self.emit_instr_offset(self.block(block_idx).first_instr_idx);
+                self.emit_instr_offset(self.block(block_idx).first_instr_offset);
             }
         }
     }
@@ -729,21 +748,21 @@ impl<'a> Compile<'a> {
     ///
     /// A hole is a placeholder for an instruction offset that is not yet known.
     fn emit_hole(&mut self) -> usize {
-        let hole_idx = self.code.len();
-        self.code.push(0);
-        hole_idx
+        self.code.push(0usize)
     }
 
     /// Patches the hole with the given index with the offset of the current instruction.
-    fn patch_hole(&mut self, hole_idx: usize) {
-        self.fixup_idxs.push(hole_idx);
-        self.code[hole_idx] = self.code.len() * mem::size_of::<usize>();
+    fn patch_hole(&mut self, hole_offset: usize) {
+        self.code.pad_to_align(code::ALIGN);
+        let instr_offset = self.code.len();
+        unsafe { ptr::write(self.code.as_mut_ptr().add(hole_offset).cast(), instr_offset) }
+        self.fixup_offsets.push(hole_offset);
     }
 
     /// Emits the offset of the instruction with the given index.
-    fn emit_instr_offset(&mut self, instr_idx: usize) {
-        self.fixup_idxs.push(self.code.len());
-        self.emit(instr_idx * mem::size_of::<InstrSlot>());
+    fn emit_instr_offset(&mut self, instr_offset: usize) {
+        let fixup_offset = self.code.push(instr_offset);
+        self.fixup_offsets.push(fixup_offset);
     }
 }
 
@@ -760,7 +779,7 @@ impl<'a> InstrVisitor for Compile<'a> {
     /// Compiles an `unreachable` instruction.
     fn visit_unreachable(&mut self) -> Result<(), Self::Error> {
         // Emit the instruction.
-        self.emit(exec::unreachable as ThreadedInstr);
+        self.emit_instr(exec::unreachable as ThreadedInstr);
 
         // After an `unreachable` instruction, the rest of the block is unreachable.
         self.set_unreachable();
@@ -836,7 +855,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         // Resolve the type of the block.
         let type_ = self.resolve_block_type(type_);
 
-        let else_hole_idx = if !self.block(0).is_unreachable {
+        let else_hole_offset = if !self.block(0).is_unreachable {
             // The `br_if_z` instruction does not have an _i variant, so ensure that the condition
             // is not an immediate operand.
             self.ensure_opd_not_imm(0);
@@ -854,20 +873,20 @@ impl<'a> InstrVisitor for Compile<'a> {
             }
 
             // Emit the instruction.
-            self.emit(select_br_if_z(self.opd(0).kind()));
+            self.emit_instr(select_br_if_z(self.opd(0).kind()));
 
             // Emit the condition and pop it from the stack.
             self.emit_and_pop_opd();
 
             // We don't yet know where the start of the `else` block is, so we emit a hole for it instead.
-            let else_hole_idx = self.emit_hole();
+            let else_hole_offset = self.emit_hole();
 
             // Pop the inputs of the block from the stack.
             for _ in 0..type_.params().len() {
                 self.pop_opd();
             }
 
-            Some(else_hole_idx)
+            Some(else_hole_offset)
         } else {
             None
         };
@@ -880,7 +899,7 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Store the hole for the start of the `else` block with the `if` block so we can patch it
         // when we reach the start of the `else` block.
-        self.block_mut(0).else_hole_idx = else_hole_idx;
+        self.block_mut(0).else_hole_offset = else_hole_offset;
 
         Ok(())
     }
@@ -905,9 +924,9 @@ impl<'a> InstrVisitor for Compile<'a> {
             // We are now at the end of the `if` block, so we want to branch to the first
             // instruction after the end of the `else` block. We don't know where that is yet, so
             // we emit a hole instead, and append it to the list of holes for the `if` block.
-            self.emit(exec::br as ThreadedInstr);
-            let hole_idx = self.emit_hole();
-            self.push_hole(0, hole_idx);
+            self.emit_instr(exec::br as ThreadedInstr);
+            let hole_offset = self.emit_hole();
+            self.push_hole(0, hole_offset);
         }
 
         // We are now at the start of the `else` block, so we can patch the hole for the start of
@@ -915,8 +934,8 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // We do this even if rest of the the current `if` block is unreachable, since the hole
         // itself could still be reachable.
-        if let Some(else_hole_idx) = self.block_mut(0).else_hole_idx.take() {
-            self.patch_hole(else_hole_idx);
+        if let Some(else_hole_offset) = self.block_mut(0).else_hole_offset.take() {
+            self.patch_hole(else_hole_offset);
         }
 
         // Pop the `if` block from the stack.
@@ -930,7 +949,7 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Copy the list of holes for the `if` block to that of the `else` block, so that they will
         // be patched when we reach the first instruction after the end of the `else` block.
-        self.block_mut(0).first_hole_idx = block.first_hole_idx;
+        self.block_mut(0).first_hole_offset = block.first_hole_offset;
 
         Ok(())
     }
@@ -960,8 +979,8 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // We do this even if the rest of the current block is unreachable, since the hole itself
         // could still be reachable.
-        if let Some(else_hole_idx) = self.block_mut(0).else_hole_idx.take() {
-            self.patch_hole(else_hole_idx);
+        if let Some(else_hole_offset) = self.block_mut(0).else_hole_offset.take() {
+            self.patch_hole(else_hole_offset);
         }
 
         // We are now at the first instruction after the end of the block, so we can patch the list
@@ -969,8 +988,8 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // We do this even if the rest of the current block is unreachable, since the holes themselves could
         // still be reachable.
-        while let Some(hole_idx) = self.pop_hole(0) {
-            self.patch_hole(hole_idx);
+        while let Some(hole_offset) = self.pop_hole(0) {
+            self.patch_hole(hole_offset);
         }
 
         // Pop the block from the stack.
@@ -1010,7 +1029,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         self.resolve_label_vals(label_idx);
-        self.emit(exec::br as ThreadedInstr);
+        self.emit_instr(exec::br as ThreadedInstr);
         self.emit_label(label_idx);
         self.set_unreachable();
 
@@ -1046,7 +1065,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         if self.block(label_idx).label_types().is_empty() {
             // If the branch target has an empty type, we don't need to copy any block inputs to
             // their expected locations, so we can generate more efficient code.
-            self.emit(select_br_if_nz(self.opd(0).kind()));
+            self.emit_instr(select_br_if_nz(self.opd(0).kind()));
             self.emit_and_pop_opd();
             self.emit_label(label_idx);
         } else {
@@ -1056,13 +1075,13 @@ impl<'a> InstrVisitor for Compile<'a> {
             // This is more expensive, because we cannot branch to the target directly. Instead, we
             // have to branch to code that first copies the block inputs to their expected
             // locations, and then branches to the target.
-            self.emit(select_br_if_z(self.opd(0).kind()));
+            self.emit_instr(select_br_if_z(self.opd(0).kind()));
             self.emit_and_pop_opd();
-            let hole_idx = self.emit_hole();
+            let hole_offset = self.emit_hole();
             self.resolve_label_vals(label_idx);
-            self.emit(exec::br as ThreadedInstr);
+            self.emit_instr(exec::br as ThreadedInstr);
             self.emit_label(label_idx);
-            self.patch_hole(hole_idx);
+            self.patch_hole(hole_offset);
         }
 
         for label_type in self.block(label_idx).label_types().iter().copied() {
@@ -1105,7 +1124,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         if self.block(default_label_idx).label_types().is_empty() {
             // If the branch target has an empty type, we don't need to copy any block inputs to
             // their expected locations, so we can generate more efficient code.
-            self.emit(select_br_table(self.opd(0).kind()));
+            self.emit_instr(select_br_table(self.opd(0).kind()));
             self.emit_and_pop_opd();
             self.emit(label_idxs.len() as u32);
             for label_idx in label_idxs.iter().copied() {
@@ -1123,28 +1142,28 @@ impl<'a> InstrVisitor for Compile<'a> {
             // This is more expensive, because we cannot branch to each target directly. Instead, for
             // each target, we have to branch to code that first copies the block inputs to their
             // expected locations, and then branches to the target.
-            self.emit(select_br_table(self.opd(0).kind()));
+            self.emit_instr(select_br_table(self.opd(0).kind()));
             self.emit_and_pop_opd();
             self.emit(label_idxs.len() as u32);
-            let mut hole_idxs = Vec::new();
+            let mut hole_offsets = Vec::new();
             for _ in 0..label_idxs.len() {
-                let hole_idx = self.emit_hole();
-                hole_idxs.push(hole_idx);
+                let hole_offset = self.emit_hole();
+                hole_offsets.push(hole_offset);
             }
-            let default_hole_idx = self.emit_hole();
-            for (label_idx, hole_idx) in label_idxs.iter().copied().zip(hole_idxs) {
+            let default_hole_offset = self.emit_hole();
+            for (label_idx, hole_offset) in label_idxs.iter().copied().zip(hole_offsets) {
                 let label_idx = label_idx as usize;
-                self.patch_hole(hole_idx);
+                self.patch_hole(hole_offset);
                 self.resolve_label_vals(label_idx);
-                self.emit(exec::br as ThreadedInstr);
+                self.emit_instr(exec::br as ThreadedInstr);
                 self.emit_label(label_idx);
                 for label_type in self.block(label_idx).label_types().iter().copied() {
                     self.push_opd(label_type);
                 }
             }
-            self.patch_hole(default_hole_idx);
+            self.patch_hole(default_hole_offset);
             self.resolve_label_vals(default_label_idx);
-            self.emit(exec::br as ThreadedInstr);
+            self.emit_instr(exec::br as ThreadedInstr);
             self.emit_label(default_label_idx);
         }
 
@@ -1173,7 +1192,7 @@ impl<'a> InstrVisitor for Compile<'a> {
             .rev()
         {
             self.ensure_opd_not_imm(0);
-            self.emit(if self.opd(0).is_reg {
+            self.emit_instr(if self.opd(0).is_reg {
                 select_copy(result_type, OpdKind::Reg)
             } else {
                 select_copy(result_type, OpdKind::Stk)
@@ -1183,7 +1202,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit the instruction.
-        self.emit(exec::return_ as ThreadedInstr);
+        self.emit_instr(exec::return_ as ThreadedInstr);
 
         // After a `return`` instruction, the rest of the block is unreachable.
         self.set_unreachable();
@@ -1213,7 +1232,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.preserve_all_regs();
 
         // Emit the instruction.
-        self.emit(match func.0.as_ref(&self.store) {
+        self.emit_instr(match func.0.as_ref(&self.store) {
             FuncEntity::Wasm(_) => exec::compile as ThreadedInstr,
             FuncEntity::Host(_) => exec::call_host as ThreadedInstr,
         });
@@ -1277,7 +1296,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.preserve_all_regs();
 
         // Emit the instruction.
-        self.emit(exec::call_indirect as ThreadedInstr);
+        self.emit_instr(exec::call_indirect as ThreadedInstr);
 
         // Emit the function index and pop it from the stack.
         self.emit_and_pop_opd();
@@ -1327,7 +1346,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit the instruction.
-        self.emit(select_ref_null(type_));
+        self.emit_instr(select_ref_null(type_));
 
         match type_ {
             RefType::FuncRef => self.emit(FuncRef::null().to_unguarded(self.store.id())),
@@ -1348,7 +1367,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit the instruction.
-        self.emit(select_ref_is_null(
+        self.emit_instr(select_ref_is_null(
             self.opd(0).type_.to_ref().unwrap(),
             self.opd(0).kind(),
         ));
@@ -1375,7 +1394,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         let func = self.instance.func(func_idx).unwrap();
 
         // Emit the instruction.
-        self.emit(exec::copy::<UnguardedFuncRef, Imm, Stk> as ThreadedInstr);
+        self.emit_instr(exec::copy::<UnguardedFuncRef, Imm, Stk> as ThreadedInstr);
         
         // Emit an unguarded handle to the [`Func`].
         self.emit(func.to_unguarded(self.store.id()));
@@ -1455,7 +1474,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit the instruction.
-        self.emit(select_select(
+        self.emit_instr(select_select(
             type_,
             self.opd(2).kind(),
             self.opd(1).kind(),
@@ -1531,7 +1550,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.preserve_local(local_idx);
 
         // Emit the instruction.
-        self.emit(select_copy(local_type, self.opd(0).kind()));
+        self.emit_instr(select_copy(local_type, self.opd(0).kind()));
 
         // Emit the input.
         self.emit_opd(0);
@@ -1556,7 +1575,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         let val_type = global.type_(&self.store).val;
 
         // Emit the instruction.
-        self.emit(select_global_get(val_type));
+        self.emit_instr(select_global_get(val_type));
 
         // Emit an unguarded handle to the [`Global`].
         self.emit(global.to_unguarded(self.store.id()));
@@ -1582,7 +1601,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         let val_type = global.type_(&self.store).val;
 
         // Emit the instruction.
-        self.emit(select_global_set(val_type, self.opd(0).kind()));
+        self.emit_instr(select_global_set(val_type, self.opd(0).kind()));
 
         // Emit the input and pop it from the stack.
         self.emit_opd(0);
@@ -1610,7 +1629,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         let elem_type = table.type_(&self.store).elem;
 
         // Emit the instruction.
-        self.emit(select_table_get(elem_type, self.opd(0).kind()));
+        self.emit_instr(select_table_get(elem_type, self.opd(0).kind()));
 
         // Emit the input and pop it from the stack.
         self.emit_opd(0);
@@ -1639,7 +1658,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         let elem_type = table.type_(&self.store).elem;
 
         // Emit the instruction.
-        self.emit(select_table_set(
+        self.emit_instr(select_table_set(
             elem_type,
             self.opd(1).kind(),
             self.opd(0).kind(),
@@ -1671,7 +1690,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         let elem_type = table.type_(&self.store).elem;
 
         // Emit the instruction.
-        self.emit(select_table_size(elem_type));
+        self.emit_instr(select_table_size(elem_type));
 
         // Emit an unguarded handle to the [`Table`].
         self.emit(table.to_unguarded(self.store.id()));
@@ -1705,7 +1724,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit the instruction.
-        self.emit(select_table_grow(elem_type));
+        self.emit_instr(select_table_grow(elem_type));
 
         // Emit the inputs and pop them from the stack.
         for _ in 0..2 {
@@ -1745,7 +1764,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit the instruction.
-        self.emit(select_table_fill(elem_type));
+        self.emit_instr(select_table_fill(elem_type));
 
         // Emit the inputs and pop them from the stack.
         for _ in 0..3 {
@@ -1786,7 +1805,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit the instruction.
-        self.emit(select_table_copy(elem_type));
+        self.emit_instr(select_table_copy(elem_type));
 
         // Emit the inputs and pop them from the stack.
         for _ in 0..3 {
@@ -1828,7 +1847,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit the instruction.
-        self.emit(select_table_init(elem_type));
+        self.emit_instr(select_table_init(elem_type));
 
         // Emit the inputs and pop them from the stack.
         for _ in 0..3 {
@@ -1857,7 +1876,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         let elem_type = elem.type_(&self.store);
 
         // Emit the instruction.
-        self.emit(select_elem_drop(elem_type));
+        self.emit_instr(select_elem_drop(elem_type));
 
         // Emit an unguarded handle to the [`Elem`].
         self.emit(elem.to_unguarded(self.store.id()));
@@ -1973,7 +1992,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // The cast to [`ThreadedInstr`] is necessary here, because otherwise we would emit a
         // function item instead of a function pointer.
-        self.emit(exec::memory_size::<Stk> as ThreadedInstr);
+        self.emit_instr(exec::memory_size::<Stk> as ThreadedInstr);
 
         // Emit an unguarded handle to the [`Mem`].
         self.emit(mem.to_unguarded(self.store.id()));
@@ -2004,7 +2023,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // The cast to [`ThreadedInstr`] is necessary here, because otherwise we would emit a
         // function item instead of a function pointer.
-        self.emit(exec::memory_grow::<Stk, Stk> as ThreadedInstr);
+        self.emit_instr(exec::memory_grow::<Stk, Stk> as ThreadedInstr);
 
         // Emit the input and pop it from the stack.
         self.emit_and_pop_opd();
@@ -2040,7 +2059,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // The cast to [`ThreadedInstr`] is necessary here, because otherwise we would emit a
         // function item instead of a function pointer.
-        self.emit(exec::memory_fill::<Stk, Stk, Stk> as ThreadedInstr);
+        self.emit_instr(exec::memory_fill::<Stk, Stk, Stk> as ThreadedInstr);
 
         // Emit the inputs and pop them from the stack.
         for _ in 0..3 {
@@ -2075,7 +2094,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // The cast to [`ThreadedInstr`] is necessary here, because otherwise we would emit a
         // function item instead of a function pointer.
-        self.emit(exec::memory_copy::<Stk, Stk, Stk> as ThreadedInstr);
+        self.emit_instr(exec::memory_copy::<Stk, Stk, Stk> as ThreadedInstr);
 
         // Emit the inputs and pop them from the stack.
         for _ in 0..3 {
@@ -2111,7 +2130,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // The cast to [`ThreadedInstr`] is necessary here, because otherwise we would emit a
         // function item instead of a function pointer.
-        self.emit(exec::memory_init::<Stk, Stk, Stk> as ThreadedInstr);
+        self.emit_instr(exec::memory_init::<Stk, Stk, Stk> as ThreadedInstr);
 
         // Emit the inputs and pop them from the stack.
         for _ in 0..3 {
@@ -2137,7 +2156,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         let data = self.instance.data(data_idx).unwrap();
 
         // Emit the instruction.
-        self.emit(exec::data_drop as ThreadedInstr);
+        self.emit_instr(exec::data_drop as ThreadedInstr);
 
         // Emit an unguarded handle to the [`Data`].
         self.emit(data.to_unguarded(self.store.id()));
@@ -2776,11 +2795,11 @@ struct Block {
     // The height of the operand stack at the start of this block.
     height: usize,
     // The index of the first instruction for this block.
-    first_instr_idx: usize,
+    first_instr_offset: usize,
     // The index of the hole for the start of the `else` block. This is only used for `if` blocks.
-    else_hole_idx: Option<usize>,
+    else_hole_offset: Option<usize>,
     // The index of the first hole for this block.
-    first_hole_idx: Option<usize>,
+    first_hole_offset: Option<usize>,
 }
 
 impl Block {

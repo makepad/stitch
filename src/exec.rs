@@ -3,6 +3,7 @@
 use {
     crate::{
         cast::{ExtendingCast, ExtendingCastFrom, WrappingCast, WrappingCastFrom},
+        code,
         data::UnguardedData,
         downcast::{DowncastMut, DowncastRef},
         elem::{ElemEntity, ElemEntityT, UnguardedElem},
@@ -401,6 +402,7 @@ where
         let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let target_idx: u32 = R::read(&mut args);
         let target_count: u32 = args.read_imm();
+        args.align_ip(align_of::<Ip>());
         let targets: *mut Ip = args.ip().cast();
         args.set_ip(*targets.add(target_idx.min(target_count) as usize));
         args.next()
@@ -442,9 +444,10 @@ pub(crate) unsafe extern "C" fn call_wasm(
     unsafe {
         let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
         let target = args.read_imm();
-        let offset = args.read_imm();
+        let offset: i32 = args.read_imm();
         // Store call frame on stack.
-        let new_sp: Sp = sp.cast::<u8>().add(offset).cast();
+        let new_sp: Sp = sp.cast::<u8>().offset(offset as isize).cast();
+        args.align_ip(code::ALIGN);
         *new_sp.offset(-4).cast() = args.ip();
         *new_sp.offset(-3).cast() = args.sp;
         *new_sp.offset(-2).cast() = args.md;
@@ -468,11 +471,11 @@ pub(crate) unsafe extern "C" fn call_host(
     unsafe {
         let mut args = Args::from_parts(ip, sp, _md, _ms, ix, sx, dx, cx);
         let func: UnguardedFunc = args.read_imm();
-        let offset = args.read_imm();
+        let offset: i32 = args.read_imm();
         let mem: Option<UnguardedMem> = args.read_imm();
 
         let mut stack = (*args.cx).stack.take().unwrap_unchecked();
-        stack.set_ptr(args.sp.cast::<u8>().add(offset).cast());
+        stack.set_ptr(args.sp.cast::<u8>().offset(offset as isize).cast());
         let FuncEntity::Host(func) = func.as_ref() else {
             hint::unreachable_unchecked();
         };
@@ -516,7 +519,7 @@ pub(crate) unsafe extern "C" fn call_indirect(
         let func_idx = args.read_stk();
         let table: UnguardedTable = args.read_imm();
         let type_: UnguardedInternedFuncType = args.read_imm();
-        let stack_offset = args.read_imm();
+        let stack_offset: i32 = args.read_imm();
         let mem: Option<UnguardedMem> = args.read_imm();
 
         let func = r#try!(table
@@ -544,7 +547,8 @@ pub(crate) unsafe extern "C" fn call_indirect(
                 let target = code.code.as_mut_ptr() as *mut u8;
 
                 // Store call frame on stack.
-                let new_sp: Sp = args.sp.cast::<u8>().add(stack_offset).cast();
+                let new_sp: Sp = args.sp.cast::<u8>().offset(stack_offset as isize).cast();
+                args.align_ip(code::ALIGN);
                 *new_sp.offset(-4).cast() = args.ip();
                 *new_sp.offset(-3).cast() = args.sp;
                 *new_sp.offset(-2).cast() = args.md;
@@ -559,7 +563,7 @@ pub(crate) unsafe extern "C" fn call_indirect(
             }
             FuncEntity::Host(func) => {
                 let mut stack = (*args.cx).stack.take().unwrap_unchecked();
-                stack.set_ptr(args.sp.cast::<u8>().add(stack_offset).cast());
+                stack.set_ptr(args.sp.cast::<u8>().offset(stack_offset as isize).cast());
                 let stack = match func.trampoline().clone().call((*args.cx).store, stack) {
                     Ok(stack) => stack,
                     Err(error) => {
@@ -1274,6 +1278,7 @@ pub(crate) unsafe extern "C" fn compile(
 ) -> ControlFlowBits {
     unsafe {
         let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+        args.align_ip(align_of::<UnguardedFuncRef>());
         let mut func = ptr::read(args.ip().cast());
         Func(Handle::from_unguarded(func, (*(*cx).store).id())).compile((*cx).store);
         let FuncEntity::Wasm(func) = func.as_mut() else {
@@ -1394,6 +1399,11 @@ impl<'a> Args<'a> {
         self.ip_offset += count;
     }
 
+    unsafe fn align_ip(&mut self, align: usize) {
+        debug_assert!(align.is_power_of_two());
+        self.ip_offset = (self.ip_offset + align - 1) & !(align - 1);
+    }
+
     unsafe fn reset_ip(&mut self) {
         self.ip_offset = 0;
     }
@@ -1404,8 +1414,8 @@ impl<'a> Args<'a> {
     }
 
     unsafe fn read_imm<T>(&mut self) -> T {
-        debug_assert!(size_of::<T>() <= size_of::<InstrSlot>());
         unsafe {
+            self.align_ip(align_of::<T>());
             let val = ptr::read(self.ip().cast());
             self.advance_ip(size_of::<InstrSlot>());
             val
@@ -1414,8 +1424,8 @@ impl<'a> Args<'a> {
 
     unsafe fn read_stk<T>(&mut self) -> T {
         unsafe {
-            let offset = self.read_imm();
-            ptr::read(self.sp.cast::<u8>().offset(offset).cast::<T>())
+            let offset: i32 = self.read_imm();
+            ptr::read(self.sp.cast::<u8>().offset(offset as isize).cast::<T>())
         }
     }
 
@@ -1433,8 +1443,8 @@ impl<'a> Args<'a> {
 
     unsafe fn write_stk<T>(&mut self, val: T) {
         unsafe {
-            let offset = self.read_imm();
-            ptr::write(self.sp.cast::<u8>().offset(offset).cast::<T>(), val)
+            let offset: i32 = self.read_imm();
+            ptr::write(self.sp.cast::<u8>().offset(offset as isize).cast::<T>(), val)
         }
     }
 
@@ -1467,8 +1477,9 @@ impl<'a> Args<'a> {
         unsafe { Ok(val.write_to_ptr(self.md.add(start as usize).cast())) }
     }
     
-    unsafe fn next(self) -> ControlFlowBits {
+    unsafe fn next(mut self) -> ControlFlowBits {
         unsafe {
+            self.align_ip(code::ALIGN);
             let instr: ThreadedInstr = *self.ip().cast();
             let (ip, sp, md, ms, ix, sx, dx, cx) = self.into_parts();
             (instr)(ip, sp, md, ms, ix, sx, dx, cx)

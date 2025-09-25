@@ -1,6 +1,7 @@
 mod aliasable_box;
 mod cast;
 mod instr;
+mod code;
 mod compile;
 mod config;
 mod const_expr;
