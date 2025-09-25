@@ -1,9 +1,8 @@
 use {
     crate::{
-        code::{CompiledCode, UncompiledCode},
         compile::Compiler,
         decode::DecodeError,
-        func::{Func, FuncType},
+        func::{CompiledFuncBody, Func, FuncType, UncompiledFuncBody},
         instance::Instance,
         module::ModuleBuilder,
         store::Store,
@@ -33,7 +32,7 @@ impl Engine {
         &self,
         type_: &FuncType,
         module: &ModuleBuilder,
-        code: &UncompiledCode,
+        code: &UncompiledFuncBody,
     ) -> Result<(), DecodeError> {
         let mut validator = self.inner.validators.lock().unwrap().pop_or_default();
         let result = validator.validate(type_, module, code);
@@ -46,8 +45,8 @@ impl Engine {
         store: &mut Store,
         func: Func,
         instance: &Instance,
-        code: &UncompiledCode,
-    ) -> CompiledCode {
+        code: &UncompiledFuncBody,
+    ) -> CompiledFuncBody {
         let mut compiler = self.inner.compilers.lock().unwrap().pop_or_default();
         let result = compiler.compile(store, func, instance, code);
         self.inner.compilers.lock().unwrap().push(compiler);

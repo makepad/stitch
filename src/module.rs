@@ -1,6 +1,5 @@
 use {
     crate::{
-        code::UncompiledCode,
         config,
         const_expr::ConstExpr,
         data::Data,
@@ -9,7 +8,7 @@ use {
         engine::Engine,
         error::Error,
         extern_val::{ExternType, ExternTypeDesc, ExternVal, ExternValDesc},
-        func::{Func, FuncType},
+        func::{UncompiledFuncBody, Func, FuncType},
         global::{Global, GlobalType},
         instance::{Instance, InstanceIniter},
         linker::{InstantiateError, Linker},
@@ -43,7 +42,7 @@ pub struct Module {
     global_vals: Box<[ConstExpr]>,
     exports: HashMap<Arc<str>, ExternValDesc>,
     start: Option<u32>,
-    codes: Box<[UncompiledCode]>,
+    codes: Box<[UncompiledFuncBody]>,
     elems: Box<[ElemDef]>,
     datas: Box<[DataDef]>,
 }
@@ -392,7 +391,7 @@ impl Module {
         }
     }
 
-    fn internal_funcs(&self) -> impl Iterator<Item = (&FuncType, &UncompiledCode)> {
+    fn internal_funcs(&self) -> impl Iterator<Item = (&FuncType, &UncompiledFuncBody)> {
         self.func_types[self.imported_func_count..]
             .iter()
             .zip(self.codes.iter())
@@ -481,7 +480,7 @@ pub(crate) struct ModuleBuilder {
     global_vals: Vec<ConstExpr>,
     exports: HashMap<Arc<str>, ExternValDesc>,
     start: Option<u32>,
-    codes: Vec<UncompiledCode>,
+    codes: Vec<UncompiledFuncBody>,
     elems: Vec<ElemDef>,
     datas: Vec<DataDef>,
     data_count: Option<u32>,
@@ -727,7 +726,7 @@ impl ModuleBuilder {
         Ok(())
     }
 
-    fn push_code(&mut self, code: UncompiledCode) -> Result<(), DecodeError> {
+    fn push_code(&mut self, code: UncompiledFuncBody) -> Result<(), DecodeError> {
         if self.codes.len() == self.func_types.len() - self.imported_func_count {
             return Err(DecodeError::new(
                 "function and code section have inconsistent sizes",

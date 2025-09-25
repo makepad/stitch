@@ -3,14 +3,13 @@
 use {
     crate::{
         cast::{ExtendingCast, ExtendingCastFrom, WrappingCast, WrappingCastFrom},
-        code::{Code, InstrSlot},
         data::UnguardedData,
         downcast::{DowncastMut, DowncastRef},
         elem::{ElemEntity, ElemEntityT, UnguardedElem},
         error::Error,
         extern_::UnguardedExtern,
         extern_ref::UnguardedExternRef,
-        func::{Func, FuncEntity, UnguardedFunc},
+        func::{Func, FuncBody, FuncEntity, InstrSlot, UnguardedFunc},
         func_ref::UnguardedFuncRef,
         global::{GlobalEntity, GlobalEntityT, UnguardedGlobal},
         mem::UnguardedMem,
@@ -191,7 +190,7 @@ pub(crate) fn exec(
     match func.0.as_mut(store) {
         FuncEntity::Wasm(func) => {
             // Obtain the compiled code for this function.
-            let Code::Compiled(code) = func.code_mut() else {
+            let FuncBody::Compiled(code) = func.code_mut() else {
                 unreachable!();
             };
 
@@ -539,7 +538,7 @@ pub(crate) unsafe extern "C" fn call_indirect(
         Func(Handle::from_unguarded(func, id)).compile(&mut *(*args.cx).store);
         match func.as_mut() {
             FuncEntity::Wasm(func) => {
-                let Code::Compiled(code) = func.code_mut() else {
+                let FuncBody::Compiled(code) = func.code_mut() else {
                     hint::unreachable_unchecked();
                 };
                 let target = code.code.as_mut_ptr() as *mut u8;
@@ -1280,7 +1279,7 @@ pub(crate) unsafe extern "C" fn compile(
         let FuncEntity::Wasm(func) = func.as_mut() else {
             hint::unreachable_unchecked();
         };
-        let Code::Compiled(state) = func.code_mut() else {
+        let FuncBody::Compiled(state) = func.code_mut() else {
             hint::unreachable_unchecked();
         };
         ptr::write(args.ip().cast(), state.code.as_mut_ptr());
@@ -1307,7 +1306,7 @@ pub(crate) unsafe extern "C" fn enter(
         let FuncEntity::Wasm(func) = func.as_ref() else {
             hint::unreachable_unchecked();
         };
-        let Code::Compiled(code) = func.code() else {
+        let FuncBody::Compiled(code) = func.code() else {
             hint::unreachable_unchecked();
         };
 

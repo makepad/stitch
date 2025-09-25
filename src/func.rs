@@ -1,6 +1,6 @@
 use {
     crate::{
-        code::{Code, UncompiledCode},
+        aliasable_box::AliasableBox,
         decode::{Decode, DecodeError, Decoder},
         error::Error,
         exec,
@@ -62,7 +62,7 @@ impl Func {
         store: &mut Store,
         type_: InternedFuncType,
         instance: Instance,
-        code: UncompiledCode,
+        code: UncompiledFuncBody,
     ) -> Self {
         Self(store.insert_func(FuncEntity::Wasm(WasmFuncEntity::new(type_, instance, code))))
     }
@@ -91,18 +91,18 @@ impl Func {
             return;
         };
         let instance = func.instance().clone();
-        let code = match mem::replace(func.code_mut(), Code::Compiling) {
-            Code::Uncompiled(code) => {
+        let code = match mem::replace(func.code_mut(), FuncBody::Compiling) {
+            FuncBody::Uncompiled(code) => {
                 let engine = store.engine().clone();
                 engine.compile(store, self, &instance, &code)
             }
-            Code::Compiling => panic!("function is already being compiled"),
-            Code::Compiled(state) => state,
+            FuncBody::Compiling => panic!("function is already being compiled"),
+            FuncBody::Compiled(state) => state,
         };
         let FuncEntity::Wasm(func) = self.0.as_mut(store) else {
             unreachable!();
         };
-        *func.code_mut() = Code::Compiled(code);
+        *func.code_mut() = FuncBody::Compiled(code);
     }
 }
 
@@ -234,16 +234,16 @@ impl FuncEntity {
 pub(crate) struct WasmFuncEntity {
     type_: InternedFuncType,
     instance: Instance,
-    code: Code,
+    code: FuncBody,
 }
 
 impl WasmFuncEntity {
     /// Creates a new [`WasmFuncEntity`] from its raw parts.
-    fn new(type_: InternedFuncType, instance: Instance, code: UncompiledCode) -> WasmFuncEntity {
+    fn new(type_: InternedFuncType, instance: Instance, code: UncompiledFuncBody) -> WasmFuncEntity {
         WasmFuncEntity {
             type_,
             instance,
-            code: Code::Uncompiled(code),
+            code: FuncBody::Uncompiled(code),
         }
     }
 
@@ -258,15 +258,61 @@ impl WasmFuncEntity {
     }
 
     /// Returns a reference to the [`Code`] of this [`WasmFuncEntity`].
-    pub(crate) fn code(&self) -> &Code {
+    pub(crate) fn code(&self) -> &FuncBody {
         &self.code
     }
 
     /// Returns a mutable reference to the [`Code`] of this [`WasmFuncEntity`].
-    pub(crate) fn code_mut(&mut self) -> &mut Code {
+    pub(crate) fn code_mut(&mut self) -> &mut FuncBody {
         &mut self.code
     }
 }
+
+
+
+#[derive(Debug)]
+pub(crate) enum FuncBody {
+    Uncompiled(UncompiledFuncBody),
+    Compiling,
+    Compiled(CompiledFuncBody),
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct UncompiledFuncBody {
+    pub(crate) locals: Box<[ValType]>,
+    pub(crate) expr: Arc<[u8]>,
+}
+
+impl Decode for UncompiledFuncBody {
+    fn decode(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
+        use std::iter;
+
+        let mut code_decoder = decoder.decode_decoder()?;
+        Ok(Self {
+            locals: {
+                let mut locals = Vec::new();
+                for _ in 0u32..code_decoder.decode()? {
+                    let count = code_decoder.decode()?;
+                    if count > usize::try_from(u32::MAX).unwrap() - locals.len() {
+                        return Err(DecodeError::new("too many locals"));
+                    }
+                    locals.extend(iter::repeat(code_decoder.decode::<ValType>()?).take(count));
+                }
+                locals.into()
+            },
+            expr: code_decoder.read_bytes_until_end().into(),
+        })
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct CompiledFuncBody {
+    pub(crate) max_stack_height: usize,
+    pub(crate) local_count: usize,
+    pub(crate) code: AliasableBox<[InstrSlot]>,
+}
+
+pub(crate) type InstrSlot = usize;
 
 #[derive(Debug)]
 pub struct HostFuncEntity {

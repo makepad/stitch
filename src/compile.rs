@@ -2,16 +2,16 @@ use {
     crate::{
         aliasable_box::AliasableBox,
         cast::{ExtendingCast, ExtendingCastFrom, WrappingCast, WrappingCastFrom},
-        code,
-        code::{
-            BlockType, CompiledCode, InstrSlot, InstrVisitor, MemArg, UncompiledCode,
+        instr,
+        instr::{
+            BlockType, InstrVisitor, MemArg,
         },
         decode::DecodeError,
         downcast::{DowncastRef, DowncastMut},
         exec,
         exec::{Imm, ReadReg, ReadFromPtr, Reg, Stk, ThreadedInstr, WriteReg, WriteToPtr},
         extern_ref::{ExternRef, UnguardedExternRef},
-        func::{Func, FuncEntity, FuncType},
+        func::{CompiledFuncBody, Func, FuncEntity, FuncType, InstrSlot, UncompiledFuncBody},
         func_ref::{FuncRef, UnguardedFuncRef},
         global::{GlobalEntity, GlobalEntityT},
         instance::Instance,
@@ -50,8 +50,8 @@ impl Compiler {
         store: &mut Store,
         func: Func,
         instance: &Instance,
-        code: &UncompiledCode,
-    ) -> CompiledCode {
+        code: &UncompiledFuncBody,
+    ) -> CompiledFuncBody {
         use crate::decode::Decoder;
 
         self.locals.clear();
@@ -104,7 +104,7 @@ impl Compiler {
 
         let mut decoder = Decoder::new(&code.expr);
         while !compile.blocks.is_empty() {
-            code::decode_instr(&mut decoder, &mut self.label_idxs, &mut compile).unwrap();
+            instr::decode_instr(&mut decoder, &mut self.label_idxs, &mut compile).unwrap();
         }
 
         for (result_idx, result_type) in type_.clone().results().iter().copied().enumerate().rev() {
@@ -119,7 +119,7 @@ impl Compiler {
             code[fixup_idx] += code.as_ptr() as usize;
         }
 
-        CompiledCode {
+        CompiledFuncBody {
             max_stack_height: compile.max_stack_height,
             local_count,
             code,

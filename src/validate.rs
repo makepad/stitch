@@ -1,11 +1,9 @@
 use {
     crate::{
-        code,
-        code::{
-            BlockType, InstrVisitor, MemArg, UncompiledCode,
-        },
+        instr,
+        instr::{BlockType, InstrVisitor, MemArg,},
         decode::DecodeError,
-        func::FuncType,
+        func::{FuncType, UncompiledFuncBody},
         global::Mut,
         module::ModuleBuilder,
         ops::*,
@@ -39,7 +37,7 @@ impl Validator {
         &mut self,
         type_: &FuncType,
         module: &ModuleBuilder,
-        code: &UncompiledCode,
+        code: &UncompiledFuncBody,
     ) -> Result<(), DecodeError> {
         use crate::decode::Decoder;
 
@@ -62,7 +60,7 @@ impl Validator {
         );
         let mut decoder = Decoder::new(&code.expr);
         while !validation.blocks.is_empty() {
-            code::decode_instr(&mut decoder, &mut self.label_idxs, &mut validation)?;
+            instr::decode_instr(&mut decoder, &mut self.label_idxs, &mut validation)?;
         }
         Ok(())
     }
