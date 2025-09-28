@@ -333,7 +333,33 @@ pub(crate) unsafe extern "C" fn br(
     }
 }
 
-pub(crate) unsafe extern "C" fn br_if_z<R>(
+pub(crate) unsafe extern "C" fn br_if<R>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where
+    R: Read<i32>
+{
+    unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+        let cond: i32 = R::read(&mut args);
+        let target = args.read_imm();
+        if cond != 0 {
+            args.set_ip(target);
+            args.next()
+        } else {
+            args.next()
+        }
+    }
+}
+
+pub(crate) unsafe extern "C" fn br_if_not<R>(
     ip: Ip,
     sp: Sp,
     md: Md,
@@ -359,7 +385,7 @@ where
     }
 }
 
-pub(crate) unsafe extern "C" fn br_if_nz<R>(
+pub(crate) unsafe extern "C" fn br_if_rel_op<T, B, R0, R1>(
     ip: Ip,
     sp: Sp,
     md: Md,
@@ -370,11 +396,15 @@ pub(crate) unsafe extern "C" fn br_if_nz<R>(
     cx: Cx,
 ) -> ControlFlowBits
 where
-    R: Read<i32>
+    B: BinOp<T, Output = i32>,
+    R0: Read<T>,
+    R1: Read<T>,
 {
     unsafe {
         let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
-        let cond: i32 = R::read(&mut args);
+        let x1 = R1::read(&mut args);
+        let x0 = R0::read(&mut args);
+        let cond: i32 = r#try!(B::bin_op(x0, x1));
         let target = args.read_imm();
         if cond != 0 {
             args.set_ip(target);
@@ -384,6 +414,37 @@ where
         }
     }
 }
+
+pub(crate) unsafe extern "C" fn br_if_not_rel_op<T, B, R0, R1>(
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+    ix: Ix,
+    sx: Sx,
+    dx: Dx,
+    cx: Cx,
+) -> ControlFlowBits
+where
+    B: BinOp<T, Output = i32>,
+    R0: Read<T>,
+    R1: Read<T>,
+{
+    unsafe {
+        let mut args = Args::from_parts(ip, sp, md, ms, ix, sx, dx, cx);
+        let x1 = R1::read(&mut args);
+        let x0 = R0::read(&mut args);
+        let cond: i32 = r#try!(B::bin_op(x0, x1));
+        let target = args.read_imm();
+        if cond == 0 {
+            args.set_ip(target);
+            args.next()
+        } else {
+            args.next()
+        }
+    }
+}
+
 
 pub(crate) unsafe extern "C" fn br_table<R>(
     ip: Ip,

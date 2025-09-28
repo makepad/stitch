@@ -4,7 +4,7 @@ use {
         code,
         code::CodeBuilder,
         instr::{
-            BlockType, InstrStream, InstrStreamAllocs, InstrVisitor, MemArg,
+            BlockType, Instr, InstrStream, InstrStreamAllocs, InstrVisitor, MemArg,
         },
         decode::DecodeError,
         downcast::{DowncastRef, DowncastMut},
@@ -379,6 +379,86 @@ impl<'a> Compile<'a> {
         // Push the output onto the stack and allocate a register for it.
         self.push_opd(output_type);
         self.alloc_reg();
+
+        Ok(())
+    }
+
+    fn compile_rel_op<T, B>(&mut self) -> Result<(), DecodeError>
+    where
+        T: ReadReg,
+        B: BinOp<T, Output = i32>,
+    {
+        if self.block(0).is_unreachable {
+            return Ok(());
+        }
+        if let Instr::BrIf { label_idx } = self.instr_stream.peek(0)? {
+            self.instr_stream.skip(1)?;
+            self.compile_br_if_rel_op::<T, B>(label_idx)
+        } else {
+            self.compile_bin_op::<T, B>()
+        }
+    }
+
+    fn compile_br_if_rel_op<T, B>(&mut self, label_idx: u32) -> Result<(), DecodeError>
+    where
+        T: ReadReg,
+        B: BinOp<T, Output = i32>,
+    {
+        self.compile_br_if_rel_op_inner(
+            label_idx,
+            select_br_if_rel_op::<T, B>(self.opd(1).kind(), self.opd(0).kind()),
+            select_br_if_not_rel_op::<T, B>(self.opd(1).kind(), self.opd(0).kind()),
+        )
+    }
+
+    fn compile_br_if_rel_op_inner(
+        &mut self,
+        label_idx: u32,
+        br_if_rel_op: ThreadedInstr,
+        br_if_not_rel_op: ThreadedInstr,
+    ) -> Result<(), DecodeError> {
+         // Wasm uses `u32` indices for labels, but we use `usize` indices.
+        let label_idx = label_idx as usize;
+
+        // This is a branch. We need to ensure that each block input is stored in the location
+        // expected by the target before the branch is taken.
+        //
+        // We do this by ensuring that each block input is a temporary operand, which is stored
+        // in a known location on the stack, and then copying them to their expected locations in
+        // the code emitted below.
+        for opd_depth in 2..self.block(label_idx).label_types().len() + 2 {
+            self.ensure_opd_not_imm(opd_depth);
+            self.ensure_opd_not_local(opd_depth);
+            self.ensure_opd_not_reg(opd_depth);
+        }
+
+        if self.block(label_idx).label_types().is_empty() {
+            // If the branch target has an empty type, we don't need to copy any block inputs to
+            // their expected locations, so we can generate more efficient code.
+            self.emit_instr(br_if_rel_op);
+            self.emit_and_pop_opd();
+            self.emit_and_pop_opd();
+            self.emit_label(label_idx);
+        } else {
+            // If the branch target has a non-empty type, we need to copy all block inputs to their
+            // expected locations.
+            //
+            // This is more expensive, because we cannot branch to the target directly. Instead, we
+            // have to branch to code that first copies the block inputs to their expected
+            // locations, and then branches to the target.
+            self.emit_instr(br_if_not_rel_op);
+            self.emit_and_pop_opd();
+            self.emit_and_pop_opd();
+            let hole_offset = self.emit_hole();
+            self.resolve_label_vals(label_idx);
+            self.emit_instr(exec::br as ThreadedInstr);
+            self.emit_label(label_idx);
+            self.patch_hole(hole_offset);
+        }
+
+        for label_type in self.block(label_idx).label_types().iter().copied() {
+            self.push_opd(label_type);
+        }
 
         Ok(())
     }
@@ -954,7 +1034,7 @@ impl<'a> InstrVisitor for Compile<'a> {
             }
 
             // Emit the instruction.
-            self.emit_instr(select_br_if_z(self.opd(0).kind()));
+            self.emit_instr(select_br_if_not(self.opd(0).kind()));
 
             // Emit the condition and pop it from the stack.
             self.emit_and_pop_opd();
@@ -1146,7 +1226,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         if self.block(label_idx).label_types().is_empty() {
             // If the branch target has an empty type, we don't need to copy any block inputs to
             // their expected locations, so we can generate more efficient code.
-            self.emit_instr(select_br_if_nz(self.opd(0).kind()));
+            self.emit_instr(select_br_if(self.opd(0).kind()));
             self.emit_and_pop_opd();
             self.emit_label(label_idx);
         } else {
@@ -1156,7 +1236,7 @@ impl<'a> InstrVisitor for Compile<'a> {
             // This is more expensive, because we cannot branch to the target directly. Instead, we
             // have to branch to code that first copies the block inputs to their expected
             // locations, and then branches to the target.
-            self.emit_instr(select_br_if_z(self.opd(0).kind()));
+            self.emit_instr(select_br_if_not(self.opd(0).kind()));
             self.emit_and_pop_opd();
             let hole_offset = self.emit_hole();
             self.resolve_label_vals(label_idx);
@@ -2272,43 +2352,43 @@ impl<'a> InstrVisitor for Compile<'a> {
     }
 
     fn visit_i32_eq(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<i32, Eq>()
+        self.compile_rel_op::<i32, Eq>()
     }
 
     fn visit_i32_ne(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<i32, Ne>()
+        self.compile_rel_op::<i32, Ne>()
     }
 
     fn visit_i32_lt_s(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<i32, Lt>()
+        self.compile_rel_op::<i32, Lt>()
     }
 
     fn visit_i32_lt_u(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<u32, Lt>()
+        self.compile_rel_op::<u32, Lt>()
     }
 
     fn visit_i32_gt_s(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<i32, Gt>()
+        self.compile_rel_op::<i32, Gt>()
     }
 
     fn visit_i32_gt_u(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<u32, Gt>()
+        self.compile_rel_op::<u32, Gt>()
     }
 
     fn visit_i32_le_s(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<i32, Le>()
+        self.compile_rel_op::<i32, Le>()
     }
 
     fn visit_i32_le_u(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<u32, Le>()
+        self.compile_rel_op::<u32, Le>()
     }
 
     fn visit_i32_ge_s(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<i32, Ge>()
+        self.compile_rel_op::<i32, Ge>()
     }
 
     fn visit_i32_ge_u(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<u32, Ge>()
+        self.compile_rel_op::<u32, Ge>()
     }
 
     fn visit_i64_eqz(&mut self) -> Result<(), DecodeError> {
@@ -2320,87 +2400,87 @@ impl<'a> InstrVisitor for Compile<'a> {
     }
 
     fn visit_i64_ne(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<i64, Ne>()
+        self.compile_rel_op::<i64, Ne>()
     }
 
     fn visit_i64_lt_s(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<i64, Lt>()
+        self.compile_rel_op::<i64, Lt>()
     }
 
     fn visit_i64_lt_u(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<u64, Lt>()
+        self.compile_rel_op::<u64, Lt>()
     }
 
     fn visit_i64_gt_s(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<i64, Gt>()
+        self.compile_rel_op::<i64, Gt>()
     }
 
     fn visit_i64_gt_u(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<u64, Gt>()
+        self.compile_rel_op::<u64, Gt>()
     }
 
     fn visit_i64_le_s(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<i64, Le>()
+        self.compile_rel_op::<i64, Le>()
     }
 
     fn visit_i64_le_u(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<u64, Le>()
+        self.compile_rel_op::<u64, Le>()
     }
 
     fn visit_i64_ge_s(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<i64, Ge>()
+        self.compile_rel_op::<i64, Ge>()
     }
 
     fn visit_i64_ge_u(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<u64, Ge>()
+        self.compile_rel_op::<u64, Ge>()
     }
 
     fn visit_f32_eq(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<f32, Eq>()
+        self.compile_rel_op::<f32, Eq>()
     }
 
     fn visit_f32_ne(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<f32, Ne>()
+        self.compile_rel_op::<f32, Ne>()
     }
 
     fn visit_f32_lt(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<f32, Lt>()
+        self.compile_rel_op::<f32, Lt>()
     }
 
     fn visit_f32_gt(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<f32, Gt>()
+        self.compile_rel_op::<f32, Gt>()
     }
 
     fn visit_f32_le(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<f32, Le>()
+        self.compile_rel_op::<f32, Le>()
     }
 
     fn visit_f32_ge(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<f32, Ge>()
+        self.compile_rel_op::<f32, Ge>()
     }
 
     fn visit_f64_eq(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<f64, Eq>()
+        self.compile_rel_op::<f64, Eq>()
     }
 
     fn visit_f64_ne(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<f64, Ne>()
+        self.compile_rel_op::<f64, Ne>()
     }
 
     fn visit_f64_lt(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<f64, Lt>()
+        self.compile_rel_op::<f64, Lt>()
     }
 
     fn visit_f64_gt(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<f64, Gt>()
+        self.compile_rel_op::<f64, Gt>()
     }
 
     fn visit_f64_le(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<f64, Le>()
+        self.compile_rel_op::<f64, Le>()
     }
 
     fn visit_f64_ge(&mut self) -> Result<(), DecodeError> {
-        self.compile_bin_op::<f64, Ge>()
+        self.compile_rel_op::<f64, Ge>()
     }
 
     fn visit_i32_clz(&mut self) -> Result<(), DecodeError> {
@@ -2994,19 +3074,57 @@ enum OpdKind {
 // functions are used to select a suitable variant of an instruction based on the types and
 // kinds of its operands.
 
-fn select_br_if_z(kind: OpdKind) -> ThreadedInstr {
+fn select_br_if(kind: OpdKind) -> ThreadedInstr {
     match kind {
-        OpdKind::Imm => exec::br_if_z::<Imm>,
-        OpdKind::Stk => exec::br_if_z::<Stk>,
-        OpdKind::Reg => exec::br_if_z::<Reg>,
+        OpdKind::Imm => exec::br_if::<Imm>,
+        OpdKind::Stk => exec::br_if::<Stk>,
+        OpdKind::Reg => exec::br_if::<Reg>,
     }
 }
 
-fn select_br_if_nz(kind: OpdKind) -> ThreadedInstr {
+fn select_br_if_not(kind: OpdKind) -> ThreadedInstr {
     match kind {
-        OpdKind::Imm => exec::br_if_nz::<Imm>,
-        OpdKind::Stk => exec::br_if_nz::<Stk>,
-        OpdKind::Reg => exec::br_if_nz::<Reg>,
+        OpdKind::Imm => exec::br_if_not::<Imm>,
+        OpdKind::Stk => exec::br_if_not::<Stk>,
+        OpdKind::Reg => exec::br_if_not::<Reg>,
+    }
+}
+
+fn select_br_if_rel_op<T, B>(input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr
+where
+    T: ReadReg,
+    B: BinOp<T, Output = i32>,
+    B::Output: WriteReg
+{
+    match (input_0, input_1) {
+        (OpdKind::Imm, OpdKind::Imm) => exec::br_if_rel_op::<T, B, Imm, Imm>,
+        (OpdKind::Stk, OpdKind::Imm) => exec::br_if_rel_op::<T, B, Stk, Imm>,
+        (OpdKind::Reg, OpdKind::Imm) => exec::br_if_rel_op::<T, B, Reg, Imm>,
+        (OpdKind::Imm, OpdKind::Stk) => exec::br_if_rel_op::<T, B, Imm, Stk>,
+        (OpdKind::Stk, OpdKind::Stk) => exec::br_if_rel_op::<T, B, Stk, Stk>,
+        (OpdKind::Reg, OpdKind::Stk) => exec::br_if_rel_op::<T, B, Reg, Stk>,
+        (OpdKind::Imm, OpdKind::Reg) => exec::br_if_rel_op::<T, B, Imm, Reg>,
+        (OpdKind::Stk, OpdKind::Reg) => exec::br_if_rel_op::<T, B, Stk, Reg>,
+        (OpdKind::Reg, OpdKind::Reg) => exec::br_if_rel_op::<T, B, Reg, Reg>,
+    }
+}
+
+fn select_br_if_not_rel_op<T, B>(input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr
+where
+    T: ReadReg,
+    B: BinOp<T, Output = i32>,
+    B::Output: WriteReg
+{
+    match (input_0, input_1) {
+        (OpdKind::Imm, OpdKind::Imm) => exec::br_if_not_rel_op::<T, B, Imm, Imm>,
+        (OpdKind::Stk, OpdKind::Imm) => exec::br_if_not_rel_op::<T, B, Stk, Imm>,
+        (OpdKind::Reg, OpdKind::Imm) => exec::br_if_not_rel_op::<T, B, Reg, Imm>,
+        (OpdKind::Imm, OpdKind::Stk) => exec::br_if_not_rel_op::<T, B, Imm, Stk>,
+        (OpdKind::Stk, OpdKind::Stk) => exec::br_if_not_rel_op::<T, B, Stk, Stk>,
+        (OpdKind::Reg, OpdKind::Stk) => exec::br_if_not_rel_op::<T, B, Reg, Stk>,
+        (OpdKind::Imm, OpdKind::Reg) => exec::br_if_not_rel_op::<T, B, Imm, Reg>,
+        (OpdKind::Stk, OpdKind::Reg) => exec::br_if_not_rel_op::<T, B, Stk, Reg>,
+        (OpdKind::Reg, OpdKind::Reg) => exec::br_if_not_rel_op::<T, B, Reg, Reg>,
     }
 }
 
