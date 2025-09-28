@@ -15,6 +15,7 @@ use {
 #[derive(Clone, Debug)]
 pub(crate) struct Validator {
     br_table_label_idxs: Vec<u32>,
+    typed_select_val_types: Vec<ValType>,
     locals: Vec<ValType>,
     blocks: Vec<Block>,
     opds: Vec<OpdType>,
@@ -25,6 +26,7 @@ impl Validator {
     pub(crate) fn new() -> Validator {
         Validator {
             br_table_label_idxs: Vec::new(),
+            typed_select_val_types: Vec::new(),
             locals: Vec::new(),
             blocks: Vec::new(),
             opds: Vec::new(),
@@ -46,6 +48,7 @@ impl Validator {
         let mut validation = Validation {
             module,
             br_table_label_idxs: &mut self.br_table_label_idxs,
+            typed_select_val_types: &mut self.typed_select_val_types,
             locals: &mut self.locals,
             blocks: &mut self.blocks,
             opds: &mut self.opds,
@@ -76,6 +79,7 @@ impl Default for Validator {
 struct Validation<'a> {
     module: &'a ModuleBuilder,
     br_table_label_idxs: &'a mut Vec<u32>,
+    typed_select_val_types: &'a mut Vec<ValType>,
     locals: &'a mut Vec<ValType>,
     blocks: &'a mut Vec<Block>,
     opds: &'a mut Vec<OpdType>,
@@ -83,6 +87,31 @@ struct Validation<'a> {
 }
 
 impl<'a> Validation<'a> {
+    fn validate_select(&mut self, type_: Option<ValType>) -> Result<(), DecodeError> {
+        if let Some(type_) = type_ {
+            self.pop_opd()?.check(ValType::I32)?;
+            self.pop_opd()?.check(type_)?;
+            self.pop_opd()?.check(type_)?;
+            self.push_opd(type_);
+        } else {
+            self.pop_opd()?.check(ValType::I32)?;
+            let input_type_1 = self.pop_opd()?;
+            let input_type_0 = self.pop_opd()?;
+            if !(input_type_0.is_num() && input_type_1.is_num()) {
+                return Err(DecodeError::new("type mismatch"));
+            }
+            if let OpdType::ValType(input_type_1) = input_type_1 {
+                input_type_0.check(input_type_1)?;
+            }
+            self.push_opd(if input_type_0.is_unknown() {
+                input_type_1
+            } else {
+                input_type_0
+            });
+        }
+        Ok(())
+    }
+
     fn validate_load<T>(&mut self, arg: MemArg) -> Result<(), DecodeError>
     where
         T: ValTypeOf,
@@ -429,29 +458,23 @@ impl<'a> InstrVisitor for Validation<'a> {
         Ok(())
     }
 
-    fn visit_select(&mut self, type_: Option<ValType>) -> Result<(), Self::Error> {
-        if let Some(type_) = type_ {
-            self.pop_opd()?.check(ValType::I32)?;
-            self.pop_opd()?.check(type_)?;
-            self.pop_opd()?.check(type_)?;
-            self.push_opd(type_);
-        } else {
-            self.pop_opd()?.check(ValType::I32)?;
-            let input_type_1 = self.pop_opd()?;
-            let input_type_0 = self.pop_opd()?;
-            if !(input_type_0.is_num() && input_type_1.is_num()) {
-                return Err(DecodeError::new("type mismatch"));
-            }
-            if let OpdType::ValType(input_type_1) = input_type_1 {
-                input_type_0.check(input_type_1)?;
-            }
-            self.push_opd(if input_type_0.is_unknown() {
-                input_type_1
-            } else {
-                input_type_0
-            });
-        }
+    fn visit_select(&mut self) -> Result<(), Self::Error> {
+        self.validate_select(None)
+    }
+
+    fn visit_typed_select_start(&mut self) -> Result<(), Self::Error> {
+        self.typed_select_val_types.clear();
         Ok(())
+    }
+
+    fn visit_typed_select_val_type(&mut self, val_type: ValType) -> Result<(), Self::Error> {
+        self.typed_select_val_types.push(val_type);
+        Ok(())
+    }
+
+    fn visit_typed_select_end(&mut self) -> Result<(), Self::Error> {
+        let val_type = self.typed_select_val_types.pop().unwrap();
+        self.validate_select(Some(val_type))
     }
 
     // Variable instructions

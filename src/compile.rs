@@ -28,6 +28,7 @@ use {
 #[derive(Clone, Debug)]
 pub(crate) struct Compiler {
     br_table_label_idxs: Vec<u32>,
+    typed_select_val_types: Vec<ValType>,
     locals: Vec<Local>,
     blocks: Vec<Block>,
     opds: Vec<Opd>,
@@ -38,6 +39,7 @@ impl Compiler {
     pub(crate) fn new() -> Self {
         Self {
             br_table_label_idxs: Vec::new(),
+            typed_select_val_types: Vec::new(),
             locals: Vec::new(),
             blocks: Vec::new(),
             opds: Vec::new(),
@@ -79,6 +81,7 @@ impl Compiler {
             type_: type_.clone(),
             instance,
             br_table_label_idxs: &mut self.br_table_label_idxs,
+            typed_select_val_types: &mut self.typed_select_val_types,
             locals,
             blocks: &mut self.blocks,
             opds: &mut self.opds,
@@ -146,6 +149,7 @@ struct Compile<'a> {
     type_: FuncType,
     instance: &'a Instance,
     br_table_label_idxs: &'a mut Vec<u32>,
+    typed_select_val_types: &'a mut Vec<ValType>,
     locals: &'a mut [Local],
     blocks: &'a mut Vec<Block>,
     opds: &'a mut Vec<Opd>,
@@ -158,6 +162,78 @@ struct Compile<'a> {
 }
 
 impl<'a> Compile<'a> {
+    fn compile_select(&mut self, type_: Option<ValType>) -> Result<(), DecodeError> {
+// Skip this instruction if it is unreachable.
+        if self.block(0).is_unreachable {
+            return Ok(());
+        }
+
+        let type_ = type_.unwrap_or_else(|| self.opd(1).type_);
+
+        // The `select` instruction does not have any _{sri}{sri}i variants.
+        //
+        // For instance, the following sequence of instructions:
+        // local.get 0
+        // local.get 1
+        // i32.const 1
+        //
+        // will likely be constant folded by most Wasm compilers, so we expect it to occur very
+        // rarely in real Wasm code. Therefore, we do not implement a select_i32_ssi instruction.
+        //
+        // Conversely, the following sequence of instructions:
+        //
+        // local.get 0
+        // local.get 1
+        // local.get 2
+        //
+        // cannot be constant folded, since the value of the condition cannot be known at compile
+        // time. Therefore, we do implement a select_sss instruction.
+        //
+        // However, sequences like the first one above are still valid Wasm code, so we need to
+        // handle them. We ensure that the condition is not an immediate operand, so that we can
+        // use the _{sri}{sri}s variant instead (which is always available).
+        self.ensure_opd_not_imm(0);
+
+        // The select instruction writes it output to a register, so we need to ensure that the
+        // register is available for the instruction to use.
+        //
+        // If the output register is already occupied, then we need to preserve the register on
+        // the stack. Otherwise, the instruction will overwrite the register while it's already
+        // occupied.
+        //
+        // The only exception is if one of the inputs occupies the output register. In that case,
+        // the select instruction can safely overwrite the register, since the input will be
+        // consumed by the instruction anyway.
+        let output_reg_idx = type_.reg_idx();
+        if self.is_reg_occupied(output_reg_idx)
+            && !self.opd(2).occupies_reg(output_reg_idx)
+            && !self.opd(1).occupies_reg(output_reg_idx)
+            && !self.opd(0).occupies_reg(output_reg_idx)
+        {
+            self.preserve_reg(output_reg_idx);
+        }
+
+        // Emit the instruction.
+        self.emit_instr(select_select(
+            type_,
+            self.opd(2).kind(),
+            self.opd(1).kind(),
+            self.opd(0).kind(),
+        ));
+
+        // Emit the inputs and pop them from the stack.
+        for _ in 0..3 {
+            self.emit_opd(0);
+            self.pop_opd();
+        }
+
+        // Push the output onto the stack and allocate a register for it.
+        self.push_opd(type_);
+        self.alloc_reg();
+
+        Ok(())
+    }
+
     fn compile_load<T>(&mut self, arg: MemArg) -> Result<(), DecodeError>
     where
         T: ValTypeOf + ReadFromPtr + WriteReg,
@@ -1435,76 +1511,23 @@ impl<'a> InstrVisitor for Compile<'a> {
     }
 
     /// Compiles a `select` instruction.
-    fn visit_select(&mut self, type_: Option<ValType>) -> Result<(), DecodeError> {
-        // Skip this instruction if it is unreachable.
-        if self.block(0).is_unreachable {
-            return Ok(());
-        }
+    fn visit_select(&mut self) -> Result<(), DecodeError> {
+        self.compile_select(None)
+    }
 
-        let type_ = type_.unwrap_or_else(|| self.opd(1).type_);
-
-        // The `select` instruction does not have any _{sri}{sri}i variants.
-        //
-        // For instance, the following sequence of instructions:
-        // local.get 0
-        // local.get 1
-        // i32.const 1
-        //
-        // will likely be constant folded by most Wasm compilers, so we expect it to occur very
-        // rarely in real Wasm code. Therefore, we do not implement a select_i32_ssi instruction.
-        //
-        // Conversely, the following sequence of instructions:
-        //
-        // local.get 0
-        // local.get 1
-        // local.get 2
-        //
-        // cannot be constant folded, since the value of the condition cannot be known at compile
-        // time. Therefore, we do implement a select_sss instruction.
-        //
-        // However, sequences like the first one above are still valid Wasm code, so we need to
-        // handle them. We ensure that the condition is not an immediate operand, so that we can
-        // use the _{sri}{sri}s variant instead (which is always available).
-        self.ensure_opd_not_imm(0);
-
-        // The select instruction writes it output to a register, so we need to ensure that the
-        // register is available for the instruction to use.
-        //
-        // If the output register is already occupied, then we need to preserve the register on
-        // the stack. Otherwise, the instruction will overwrite the register while it's already
-        // occupied.
-        //
-        // The only exception is if one of the inputs occupies the output register. In that case,
-        // the select instruction can safely overwrite the register, since the input will be
-        // consumed by the instruction anyway.
-        let output_reg_idx = type_.reg_idx();
-        if self.is_reg_occupied(output_reg_idx)
-            && !self.opd(2).occupies_reg(output_reg_idx)
-            && !self.opd(1).occupies_reg(output_reg_idx)
-            && !self.opd(0).occupies_reg(output_reg_idx)
-        {
-            self.preserve_reg(output_reg_idx);
-        }
-
-        // Emit the instruction.
-        self.emit_instr(select_select(
-            type_,
-            self.opd(2).kind(),
-            self.opd(1).kind(),
-            self.opd(0).kind(),
-        ));
-
-        // Emit the inputs and pop them from the stack.
-        for _ in 0..3 {
-            self.emit_opd(0);
-            self.pop_opd();
-        }
-
-        // Push the output onto the stack and allocate a register for it.
-        self.push_opd(type_);
-        self.alloc_reg();
-
+    fn visit_typed_select_start(&mut self) -> Result<(), DecodeError> {
+        self.typed_select_val_types.clear();
         Ok(())
+    }
+
+    fn visit_typed_select_val_type(&mut self, type_: ValType) -> Result<(), DecodeError> {
+        self.typed_select_val_types.push(type_);
+        Ok(())
+    }
+
+    fn visit_typed_select_end(&mut self) -> Result<(), DecodeError> {
+        let val_type = self.typed_select_val_types.pop().unwrap();
+        self.compile_select(Some(val_type))
     }
 
     // Variable instructions

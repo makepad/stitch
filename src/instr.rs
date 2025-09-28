@@ -31,7 +31,10 @@ macro_rules! for_each_instr {
 
             // Parametric instructions
             Drop => visit_drop
-            Select { val_type: Option<ValType> } => visit_select
+            Select => visit_select
+            TypedSelectStart => visit_typed_select_start
+            TypedSelectValType { val_type: ValType } => visit_typed_select_val_type
+            TypedSelectEnd => visit_typed_select_end
 
             // Variable instructions
             LocalGet { local_idx: u32 } => visit_local_get
@@ -341,6 +344,7 @@ impl<'a> InstrDecoder<'a> {
         match self.state {
             InstrDecoderState::Start => self.decode_start(visitor),
             InstrDecoderState::BrTable { label_count } => self.decode_br_table(label_count, visitor),
+            InstrDecoderState::TypedSelect { val_type_count } => self.decode_typed_select(val_type_count, visitor),
         }
     }
 
@@ -374,12 +378,14 @@ impl<'a> InstrDecoder<'a> {
                 visitor.visit_call_indirect(table_idx, type_idx)
             }
             0x1A => visitor.visit_drop(),
-            0x1B => visitor.visit_select(None),
+            0x1B => visitor.visit_select(),
             0x1C => {
-                if self.decoder.decode::<u32>()? != 1 {
-                    return Err(DecodeError::new(""))?;
+                let val_type_count = self.decoder.decode::<u32>()?;
+                if val_type_count != 1 {
+                    return Err(DecodeError::new("invalid value type count"))?;
                 }
-                visitor.visit_select(Some(self.decoder.decode()?))
+                self.state = InstrDecoderState::TypedSelect { val_type_count };
+                visitor.visit_typed_select_start()
             }
             0x20 => visitor.visit_local_get(self.decoder.decode()?),
             0x21 => visitor.visit_local_set(self.decoder.decode()?),
@@ -624,6 +630,24 @@ impl<'a> InstrDecoder<'a> {
             visitor.visit_br_table_end(default_label_idx)
         }
     }
+
+    fn decode_typed_select<V>(
+        &mut self,
+        val_type_count: u32,
+        visitor: &mut V,
+    ) -> Result<V::Ok, V::Error>
+    where
+        V: InstrVisitor,
+    {
+        if let Some(val_type_count) = val_type_count.checked_sub(1) {
+            let val_type = self.decoder.decode()?;
+            self.state = InstrDecoderState::TypedSelect { val_type_count };
+            visitor.visit_typed_select_val_type(val_type)
+        } else {
+            self.state = InstrDecoderState::Start;
+            visitor.visit_typed_select_end()
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -631,5 +655,8 @@ enum InstrDecoderState {
     Start,
     BrTable {
         label_count: u32,
+    },
+    TypedSelect {
+        val_type_count: u32,
     }
 }
