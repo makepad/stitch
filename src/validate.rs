@@ -14,6 +14,7 @@ use {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Validator {
+    br_table_label_idxs: Vec<u32>,
     locals: Vec<ValType>,
     blocks: Vec<Block>,
     opds: Vec<OpdType>,
@@ -23,6 +24,7 @@ pub(crate) struct Validator {
 impl Validator {
     pub(crate) fn new() -> Validator {
         Validator {
+            br_table_label_idxs: Vec::new(),
             locals: Vec::new(),
             blocks: Vec::new(),
             opds: Vec::new(),
@@ -43,6 +45,7 @@ impl Validator {
         self.opds.clear();
         let mut validation = Validation {
             module,
+            br_table_label_idxs: &mut self.br_table_label_idxs,
             locals: &mut self.locals,
             blocks: &mut self.blocks,
             opds: &mut self.opds,
@@ -72,6 +75,7 @@ impl Default for Validator {
 #[derive(Debug)]
 struct Validation<'a> {
     module: &'a ModuleBuilder,
+    br_table_label_idxs: &'a mut Vec<u32>,
     locals: &'a mut Vec<ValType>,
     blocks: &'a mut Vec<Block>,
     opds: &'a mut Vec<OpdType>,
@@ -318,12 +322,23 @@ impl<'a> InstrVisitor for Validation<'a> {
         }
         Ok(())
     }
+    
+    fn visit_br_table_start(&mut self) -> Result<(), Self::Error> {
+        self.br_table_label_idxs.clear();
+        Ok(())
+    }
 
-    fn visit_br_table(
+    fn visit_br_table_label(&mut self, label_idx: u32) -> Result<(), Self::Error> {
+        self.br_table_label_idxs.push(label_idx);
+        Ok(())
+    }
+
+    fn visit_br_table_end(
         &mut self,
-        label_idxs: Vec<u32>,
         default_label_idx: u32,
     ) -> Result<(), Self::Error> {
+        let label_idxs = mem::take(self.br_table_label_idxs);
+
         self.pop_opd()?.check(ValType::I32)?;
         self.label(default_label_idx)?;
         let arity = self.block(default_label_idx).label_types().len();
@@ -353,6 +368,7 @@ impl<'a> InstrVisitor for Validation<'a> {
             self.pop_opd()?.check(label_type)?;
         }
         self.set_unreachable();
+        *self.br_table_label_idxs = label_idxs;
         Ok(())
     }
 

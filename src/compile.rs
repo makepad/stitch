@@ -27,6 +27,7 @@ use {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Compiler {
+    br_table_label_idxs: Vec<u32>,
     locals: Vec<Local>,
     blocks: Vec<Block>,
     opds: Vec<Opd>,
@@ -36,6 +37,7 @@ pub(crate) struct Compiler {
 impl Compiler {
     pub(crate) fn new() -> Self {
         Self {
+            br_table_label_idxs: Vec::new(),
             locals: Vec::new(),
             blocks: Vec::new(),
             opds: Vec::new(),
@@ -76,6 +78,7 @@ impl Compiler {
             store,
             type_: type_.clone(),
             instance,
+            br_table_label_idxs: &mut self.br_table_label_idxs,
             locals,
             blocks: &mut self.blocks,
             opds: &mut self.opds,
@@ -142,6 +145,7 @@ struct Compile<'a> {
     store: &'a Store,
     type_: FuncType,
     instance: &'a Instance,
+    br_table_label_idxs: &'a mut Vec<u32>,
     locals: &'a mut [Local],
     blocks: &'a mut Vec<Block>,
     opds: &'a mut Vec<Opd>,
@@ -1090,12 +1094,20 @@ impl<'a> InstrVisitor for Compile<'a> {
         Ok(())
     }
 
+    fn visit_br_table_start(&mut self) -> Result<(), Self::Error> {
+        self.br_table_label_idxs.clear();
+        Ok(())
+    }
+
+    fn visit_br_table_label(&mut self, label_idx: u32) -> Result<(), Self::Error> {
+        self.br_table_label_idxs.push(label_idx);
+        Ok(())
+    }
+
     /// Compiles a `br_table` instruction.
-    fn visit_br_table(
-        &mut self,
-        label_idxs: Vec<u32>,
-        default_label_idx: u32,
-    ) -> Result<(), Self::Error> {
+    fn visit_br_table_end(&mut self, default_label_idx: u32) -> Result<(), Self::Error> {
+        let label_idxs = mem::take(self.br_table_label_idxs);
+
         // Skip this instruction if it is unreachable.
         if self.block(0).is_unreachable {
             return Ok(());
@@ -1168,6 +1180,8 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // After a `br_table` instruction, the rest of the block is unreachable.
         self.set_unreachable();
+
+        *self.br_table_label_idxs = label_idxs;
 
         Ok(())
     }

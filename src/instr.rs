@@ -17,7 +17,9 @@ macro_rules! for_each_instr {
             End => visit_end
             Br { label_idx: u32 } => visit_br
             BrIf { label_idx: u32 } => visit_br_if
-            BrTable { label_idxs: Vec<u32>, label_idx: u32 } => visit_br_table
+            BrTableStart => visit_br_table_start
+            BrTableLabel { label_idx: u32 } => visit_br_table_label
+            BrTableEnd { default_label_idx: u32 } => visit_br_table_end
             Return => visit_return
             Call { func_idx: u32 } => visit_call
             CallIndirect { table_idx: u32, type_idx: u32 } => visit_call_indirect
@@ -318,14 +320,31 @@ impl Decode for MemArg {
 #[derive(Debug)]
 pub(crate) struct InstrDecoder<'a> {
     decoder: &'a mut Decoder<'a>,
+    state: InstrDecoderState,
 }
 
 impl<'a> InstrDecoder<'a> {
     pub(crate) fn new(decoder: &'a mut Decoder<'a>) -> Self {
-        Self { decoder }
+        Self {
+            decoder,
+            state: InstrDecoderState::Start,
+        }
     }
 
     pub(crate) fn decode<V>(
+        &mut self,
+        visitor: &mut V,
+    ) -> Result<V::Ok, V::Error>
+    where
+        V: InstrVisitor,
+    {
+        match self.state {
+            InstrDecoderState::Start => self.decode_start(visitor),
+            InstrDecoderState::BrTable { label_count } => self.decode_br_table(label_count, visitor),
+        }
+    }
+
+    fn decode_start<V>(
         &mut self,
         visitor: &mut V,
     ) -> Result<V::Ok, V::Error>
@@ -343,11 +362,9 @@ impl<'a> InstrDecoder<'a> {
             0x0C => visitor.visit_br(self.decoder.decode()?),
             0x0D => visitor.visit_br_if(self.decoder.decode()?),
             0x0E => {
-                let mut label_idxs = Vec::new();
-                for label_idx in self.decoder.decode_iter()? {
-                    label_idxs.push(label_idx?);
-                }
-                visitor.visit_br_table(label_idxs, self.decoder.decode()?)
+                let label_count = self.decoder.decode::<u32>()?;
+                self.state = InstrDecoderState::BrTable { label_count };
+                visitor.visit_br_table_start()
             }
             0x0F => visitor.visit_return(),
             0x10 => visitor.visit_call(self.decoder.decode()?),
@@ -589,4 +606,30 @@ impl<'a> InstrDecoder<'a> {
         }
     }
 
+    fn decode_br_table<V>(
+        &mut self,
+        label_count: u32,
+        visitor: &mut V,
+    ) -> Result<V::Ok, V::Error>
+    where
+        V: InstrVisitor,
+    {
+        if let Some(label_count) = label_count.checked_sub(1) {
+            let label_idx = self.decoder.decode()?;
+            self.state = InstrDecoderState::BrTable { label_count };
+            visitor.visit_br_table_label(label_idx)
+        } else {
+            let default_label_idx = self.decoder.decode()?;
+            self.state = InstrDecoderState::Start;
+            visitor.visit_br_table_end(default_label_idx)
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum InstrDecoderState {
+    Start,
+    BrTable {
+        label_count: u32,
+    }
 }
