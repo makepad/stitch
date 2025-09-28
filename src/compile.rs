@@ -3,9 +3,8 @@ use {
         cast::{ExtendingCast, ExtendingCastFrom, WrappingCast, WrappingCastFrom},
         code,
         code::CodeBuilder,
-        instr,
         instr::{
-            BlockType, InstrVisitor, MemArg,
+            BlockType, InstrDecoder, InstrVisitor, MemArg,
         },
         decode::DecodeError,
         downcast::{DowncastRef, DowncastMut},
@@ -28,7 +27,6 @@ use {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Compiler {
-    label_idxs: Vec<u32>,
     locals: Vec<Local>,
     blocks: Vec<Block>,
     opds: Vec<Opd>,
@@ -38,7 +36,6 @@ pub(crate) struct Compiler {
 impl Compiler {
     pub(crate) fn new() -> Self {
         Self {
-            label_idxs: Vec::new(),
             locals: Vec::new(),
             blocks: Vec::new(),
             opds: Vec::new(),
@@ -104,8 +101,9 @@ impl Compiler {
         );
 
         let mut decoder = Decoder::new(&code.expr);
+        let mut instr_decoder = InstrDecoder::new(&mut decoder);
         while !compile.blocks.is_empty() {
-            instr::decode_instr(&mut decoder, &mut self.label_idxs, &mut compile).unwrap();
+            instr_decoder.decode(&mut compile).unwrap();
         }
 
         for (result_idx, result_type) in type_.clone().results().iter().copied().enumerate().rev() {
@@ -767,6 +765,7 @@ impl<'a> Compile<'a> {
 }
 
 impl<'a> InstrVisitor for Compile<'a> {
+    type Ok = ();
     type Error = DecodeError;
 
     // Control instructions
@@ -1094,7 +1093,7 @@ impl<'a> InstrVisitor for Compile<'a> {
     /// Compiles a `br_table` instruction.
     fn visit_br_table(
         &mut self,
-        label_idxs: &[u32],
+        label_idxs: Vec<u32>,
         default_label_idx: u32,
     ) -> Result<(), Self::Error> {
         // Skip this instruction if it is unreachable.

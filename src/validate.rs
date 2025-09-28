@@ -1,7 +1,6 @@
 use {
     crate::{
-        instr,
-        instr::{BlockType, InstrVisitor, MemArg,},
+        instr::{BlockType, InstrDecoder, InstrVisitor, MemArg,},
         decode::DecodeError,
         func::{FuncType, UncompiledFuncBody},
         global::Mut,
@@ -15,7 +14,6 @@ use {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Validator {
-    label_idxs: Vec<u32>,
     locals: Vec<ValType>,
     blocks: Vec<Block>,
     opds: Vec<OpdType>,
@@ -25,7 +23,6 @@ pub(crate) struct Validator {
 impl Validator {
     pub(crate) fn new() -> Validator {
         Validator {
-            label_idxs: Vec::new(),
             locals: Vec::new(),
             blocks: Vec::new(),
             opds: Vec::new(),
@@ -41,7 +38,6 @@ impl Validator {
     ) -> Result<(), DecodeError> {
         use crate::decode::Decoder;
 
-        self.label_idxs.clear();
         self.locals.clear();
         self.blocks.clear();
         self.opds.clear();
@@ -59,8 +55,9 @@ impl Validator {
             FuncType::new([], type_.results().iter().copied()),
         );
         let mut decoder = Decoder::new(&code.expr);
+        let mut instr_decoder = InstrDecoder::new(&mut decoder);
         while !validation.blocks.is_empty() {
-            instr::decode_instr(&mut decoder, &mut self.label_idxs, &mut validation)?;
+            instr_decoder.decode(&mut validation)?;
         }
         Ok(())
     }
@@ -237,6 +234,7 @@ impl<'a> Validation<'a> {
 }
 
 impl<'a> InstrVisitor for Validation<'a> {
+    type Ok = ();
     type Error = DecodeError;
 
     // Control instructions
@@ -323,7 +321,7 @@ impl<'a> InstrVisitor for Validation<'a> {
 
     fn visit_br_table(
         &mut self,
-        label_idxs: &[u32],
+        label_idxs: Vec<u32>,
         default_label_idx: u32,
     ) -> Result<(), Self::Error> {
         self.pop_opd()?.check(ValType::I32)?;
