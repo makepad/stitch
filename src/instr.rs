@@ -1,7 +1,10 @@
-use crate::{
-    decode::{Decode, DecodeError, Decoder},
-    ref_::RefType,
-    val::ValType,
+use {
+    crate::{
+        decode::{Decode, DecodeError, Decoder},
+        ref_::RefType,
+        val::ValType,
+    },
+    std::collections::VecDeque,
 };
 
 macro_rules! for_each_instr {
@@ -240,18 +243,27 @@ macro_rules! for_each_instr {
     };
 }
 
-macro_rules! define_instr_visitor {
+macro_rules! define_instr_enum {
     ($($instr:ident $({ $($arg:ident: $arg_ty:ty),* })? => $visit:ident)*) => {
-        pub(crate) trait InstrVisitor {
-            type Ok;
-            type Error: From<DecodeError>;
+        #[derive(Clone, Copy, Debug)]
+        pub(crate) enum Instr {
+            $($instr $( { $($arg: $arg_ty),* } )?),*
+        }
 
-            $(fn $visit(&mut self $(, $($arg: $arg_ty),*)?) -> Result<Self::Ok, Self::Error>;)*
+        impl Instr {
+            pub(crate) fn visit<V>(self, visitor: &mut V) -> Result<V::Ok, V::Error>
+            where
+                V: InstrVisitor,
+            {
+                match self {
+                    $(Instr::$instr $( { $($arg),* } )? => visitor.$visit( $( $($arg),* )? )),*
+                }
+            }
         }
     }
 }
 
-for_each_instr!(define_instr_visitor);
+for_each_instr!(define_instr_enum);
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum BlockType {
@@ -322,18 +334,18 @@ impl Decode for MemArg {
 
 #[derive(Debug)]
 pub(crate) struct InstrDecoder<'a> {
-    decoder: &'a mut Decoder<'a>,
+    decoder: Decoder<'a>,
     state: InstrDecoderState,
     frames: Vec<InstrDecoderFrame>,
 }
 
 impl<'a> InstrDecoder<'a> {
-    pub(crate) fn new_with_allocs(decoder: &'a mut Decoder<'a>, allocs: InstrDecoderAllocs) -> Self {
+    pub(crate) fn new_with_allocs(bytes: &'a [u8], allocs: InstrDecoderAllocs) -> Self {
         let mut frames = allocs.frames;
         frames.clear();
         frames.push(InstrDecoderFrame::Block);
         Self {
-            decoder,
+            decoder: Decoder::new(bytes),
             state: InstrDecoderState::Start,
             frames,
         }
@@ -705,4 +717,97 @@ enum InstrDecoderFrame {
 #[derive(Clone, Default, Debug)]
 pub(crate) struct InstrDecoderAllocs {
     frames: Vec<InstrDecoderFrame>,
+}
+
+macro_rules! define_instr_visitor {
+    ($($instr:ident $({ $($arg:ident: $arg_ty:ty),* })? => $visit:ident)*) => {
+        pub(crate) trait InstrVisitor {
+            type Ok;
+            type Error: From<DecodeError>;
+
+            $(fn $visit(&mut self $(, $($arg: $arg_ty),*)?) -> Result<Self::Ok, Self::Error>;)*
+        }
+    }
+}
+
+for_each_instr!(define_instr_visitor);
+
+macro_rules! define_instr_factory {
+    ($($instr:ident $({ $($arg:ident: $arg_ty:ty),* })? => $visit:ident)*) => {
+        pub(crate) struct InstrFactory;
+
+        impl InstrVisitor for InstrFactory {
+            type Ok = Instr;
+            type Error = DecodeError;
+
+            $(fn $visit(&mut self $(, $($arg: $arg_ty),*)?) -> Result<Self::Ok, Self::Error> {
+                Ok(Instr::$instr $( { $($arg),* } )?)
+            })*
+        }
+    }
+}
+
+for_each_instr!(define_instr_factory);
+
+#[derive(Debug)]
+pub(crate) struct InstrStream<'a> {
+    decoder: InstrDecoder<'a>,
+    peeked: VecDeque<Instr>,
+}
+
+impl<'a> InstrStream<'a> {
+    pub(crate) fn new_with_allocs(bytes: &'a [u8], allocs: InstrStreamAllocs) -> Self {
+        let mut peeked = allocs.peeked;
+        peeked.clear();
+        Self {
+            decoder: InstrDecoder::new_with_allocs(bytes, allocs.decoder_allocs),
+            peeked,
+        }
+    }
+
+    pub(crate) fn into_allocs(self) -> InstrStreamAllocs {
+        InstrStreamAllocs {
+            decoder_allocs: self.decoder.into_allocs(),
+            peeked: self.peeked,
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.decoder.is_at_end() && self.peeked.is_empty()
+    }
+
+    pub(crate) fn peek(&mut self, index: usize) -> Result<Instr, DecodeError> {
+        while self.peeked.len() <= index {
+            let instr = self.decoder.decode(&mut InstrFactory)?;
+            self.peeked.push_back(instr);
+        }
+        Ok(self.peeked[index])
+    }
+
+    pub(crate) fn skip(&mut self, count: usize) -> Result<(), DecodeError> {
+        if count <= self.peeked.len() {
+            self.peeked.drain(..count);
+        } else {
+            let count = count - self.peeked.len();
+            self.peeked.clear();
+            for _ in 0..count {
+                self.decoder.decode(&mut InstrFactory)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn next(&mut self) -> Result<Instr, DecodeError> {
+        if let Some(instr) = self.peeked.pop_front() {
+            Ok(instr)
+        } else {
+            self.decoder.decode(&mut InstrFactory)
+        }
+    }
+}
+
+#[derive(Clone, Default, Debug)]
+pub(crate) struct InstrStreamAllocs {
+    decoder_allocs: InstrDecoderAllocs,
+    peeked: VecDeque<Instr>,
 }

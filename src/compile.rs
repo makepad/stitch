@@ -4,7 +4,7 @@ use {
         code,
         code::CodeBuilder,
         instr::{
-            BlockType, InstrDecoder, InstrDecoderAllocs, InstrVisitor, MemArg,
+            BlockType, InstrStream, InstrStreamAllocs, InstrVisitor, MemArg,
         },
         decode::DecodeError,
         downcast::{DowncastRef, DowncastMut},
@@ -27,7 +27,7 @@ use {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Compiler {
-    instr_decoder_allocs: InstrDecoderAllocs,
+    instr_stream_allocs: InstrStreamAllocs,
     br_table_label_idxs: Vec<u32>,
     typed_select_val_types: Vec<ValType>,
     locals: Vec<Local>,
@@ -39,7 +39,7 @@ pub(crate) struct Compiler {
 impl Compiler {
     pub(crate) fn new() -> Self {
         Self {
-            instr_decoder_allocs: InstrDecoderAllocs::default(),
+            instr_stream_allocs: InstrStreamAllocs::default(),
             br_table_label_idxs: Vec::new(),
             typed_select_val_types: Vec::new(),
             locals: Vec::new(),
@@ -56,8 +56,6 @@ impl Compiler {
         instance: &Instance,
         code: &UncompiledFuncBody,
     ) -> CompiledFuncBody {
-        use crate::decode::Decoder;
-
         self.locals.clear();
         self.blocks.clear();
         self.opds.clear();
@@ -82,6 +80,7 @@ impl Compiler {
             store,
             type_: type_.clone(),
             instance,
+            instr_stream: InstrStream::new_with_allocs(&code.expr, mem::take(&mut self.instr_stream_allocs)),
             br_table_label_idxs: &mut self.br_table_label_idxs,
             typed_select_val_types: &mut self.typed_select_val_types,
             locals,
@@ -108,13 +107,10 @@ impl Compiler {
                 .map(|mem| mem.to_unguarded(store.id())),
         );
 
-        let mut decoder = Decoder::new(&code.expr);
-        let mut instr_decoder = InstrDecoder::new_with_allocs(&mut decoder, mem::take(&mut self.instr_decoder_allocs));
-        while !instr_decoder.is_at_end() {
-            instr_decoder.decode(&mut compile).unwrap();
+        while !compile.instr_stream.is_empty() {
+            let instr = compile.instr_stream.next().unwrap();
+            instr.visit(&mut compile).unwrap();
         }
-        self.instr_decoder_allocs = instr_decoder.into_allocs();
-
         for (result_idx, result_type) in type_.clone().results().iter().copied().enumerate().rev() {
             compile.emit_instr(select_copy(result_type, OpdKind::Stk));
             compile.emit_stack_offset(compile.temp_stack_idx(result_idx));
@@ -131,6 +127,8 @@ impl Compiler {
                 ptr::write(fixup_ptr.cast(), instr_ptr);
             }
         }
+
+        self.instr_stream_allocs = compile.instr_stream.into_allocs();
 
         CompiledFuncBody {
             max_stack_height: compile.max_stack_height,
@@ -151,6 +149,7 @@ struct Compile<'a> {
     store: &'a Store,
     type_: FuncType,
     instance: &'a Instance,
+    instr_stream: InstrStream<'a>,
     br_table_label_idxs: &'a mut Vec<u32>,
     typed_select_val_types: &'a mut Vec<ValType>,
     locals: &'a mut [Local],

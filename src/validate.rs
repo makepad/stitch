@@ -42,8 +42,6 @@ impl Validator {
         module: &ModuleBuilder,
         code: &UncompiledFuncBody,
     ) -> Result<(), DecodeError> {
-        use crate::decode::Decoder;
-
         self.locals.clear();
         self.blocks.clear();
         self.opds.clear();
@@ -62,12 +60,11 @@ impl Validator {
             BlockKind::Block,
             FuncType::new([], type_.results().iter().copied()),
         );
-        let mut decoder = Decoder::new(&code.expr);
-        let mut instr_decoder = InstrDecoder::new_with_allocs(&mut decoder, mem::take(&mut self.instr_decoder_allocs));
-        while !instr_decoder.is_at_end() {
-            instr_decoder.decode(&mut validation)?;
+        let mut decoder: InstrDecoder<'_> = InstrDecoder::new_with_allocs(&code.expr, mem::take(&mut self.instr_decoder_allocs));
+        while !decoder.is_at_end() {
+            decoder.decode(&mut validation)?;
         }
-        self.instr_decoder_allocs = instr_decoder.into_allocs();
+        self.instr_decoder_allocs = decoder.into_allocs();
         Ok(())
     }
 }
