@@ -4,7 +4,7 @@ use {
         code,
         code::CodeBuilder,
         instr::{
-            BlockType, InstrDecoder, InstrVisitor, MemArg,
+            BlockType, InstrDecoder, InstrDecoderAllocs, InstrVisitor, MemArg,
         },
         decode::DecodeError,
         downcast::{DowncastRef, DowncastMut},
@@ -27,6 +27,7 @@ use {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Compiler {
+    instr_decoder_allocs: InstrDecoderAllocs,
     br_table_label_idxs: Vec<u32>,
     typed_select_val_types: Vec<ValType>,
     locals: Vec<Local>,
@@ -38,6 +39,7 @@ pub(crate) struct Compiler {
 impl Compiler {
     pub(crate) fn new() -> Self {
         Self {
+            instr_decoder_allocs: InstrDecoderAllocs::default(),
             br_table_label_idxs: Vec::new(),
             typed_select_val_types: Vec::new(),
             locals: Vec::new(),
@@ -107,10 +109,11 @@ impl Compiler {
         );
 
         let mut decoder = Decoder::new(&code.expr);
-        let mut instr_decoder = InstrDecoder::new(&mut decoder);
-        while !compile.blocks.is_empty() {
+        let mut instr_decoder = InstrDecoder::new_with_allocs(&mut decoder, mem::take(&mut self.instr_decoder_allocs));
+        while !instr_decoder.is_at_end() {
             instr_decoder.decode(&mut compile).unwrap();
         }
+        self.instr_decoder_allocs = instr_decoder.into_allocs();
 
         for (result_idx, result_type) in type_.clone().results().iter().copied().enumerate().rev() {
             compile.emit_instr(select_copy(result_type, OpdKind::Stk));

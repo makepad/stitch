@@ -1,6 +1,6 @@
 use {
     crate::{
-        instr::{BlockType, InstrDecoder, InstrVisitor, MemArg,},
+        instr::{BlockType, InstrDecoder, InstrDecoderAllocs, InstrVisitor, MemArg,},
         decode::DecodeError,
         func::{FuncType, UncompiledFuncBody},
         global::Mut,
@@ -14,6 +14,7 @@ use {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Validator {
+    instr_decoder_allocs: InstrDecoderAllocs,
     br_table_label_idxs: Vec<u32>,
     typed_select_val_types: Vec<ValType>,
     locals: Vec<ValType>,
@@ -25,6 +26,7 @@ pub(crate) struct Validator {
 impl Validator {
     pub(crate) fn new() -> Validator {
         Validator {
+            instr_decoder_allocs: InstrDecoderAllocs::default(),
             br_table_label_idxs: Vec::new(),
             typed_select_val_types: Vec::new(),
             locals: Vec::new(),
@@ -61,10 +63,11 @@ impl Validator {
             FuncType::new([], type_.results().iter().copied()),
         );
         let mut decoder = Decoder::new(&code.expr);
-        let mut instr_decoder = InstrDecoder::new(&mut decoder);
-        while !validation.blocks.is_empty() {
+        let mut instr_decoder = InstrDecoder::new_with_allocs(&mut decoder, mem::take(&mut self.instr_decoder_allocs));
+        while !instr_decoder.is_at_end() {
             instr_decoder.decode(&mut validation)?;
         }
+        self.instr_decoder_allocs = instr_decoder.into_allocs();
         Ok(())
     }
 }

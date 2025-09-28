@@ -12,7 +12,7 @@ impl<'a> Decoder<'a> {
     }
 
     #[inline]
-    pub(crate) fn is_at_end(&self) -> bool {
+    pub(crate) fn is_at_eof(&self) -> bool {
         self.position == self.bytes.len()
     }
 
@@ -22,7 +22,7 @@ impl<'a> Decoder<'a> {
             .bytes
             .get(self.position)
             .copied()
-            .ok_or_else(|| DecodeError::new("unexpected end"))?;
+            .ok_or_else(|| DecodeError::new("unexpected end of file"))?;
         self.position += 1;
         Ok(byte)
     }
@@ -32,7 +32,7 @@ impl<'a> Decoder<'a> {
         let bytes = self
             .bytes
             .get(self.position..self.position + count)
-            .ok_or_else(|| DecodeError::new("unexpected end"))?;
+            .ok_or_else(|| DecodeError::new("unexpected end of file"))?;
         self.position += count;
         Ok(bytes)
     }

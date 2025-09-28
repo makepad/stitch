@@ -70,7 +70,7 @@ impl Module {
         }
         let mut builder = ModuleBuilder::new();
         let mut expected_section_ids = EXPECTED_SECTION_IDS.iter().copied();
-        while !decoder.is_at_end() {
+        while !decoder.is_at_eof() {
             let section_id = decoder.read_byte()?;
             if section_id != 0 {
                 if !expected_section_ids
@@ -157,7 +157,7 @@ impl Module {
                 }
                 _ => unreachable!(),
             }
-            if !section_decoder.is_at_end() {
+            if !section_decoder.is_at_eof() {
                 return Err(DecodeError::new(""))?;
             }
         }

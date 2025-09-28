@@ -324,14 +324,29 @@ impl Decode for MemArg {
 pub(crate) struct InstrDecoder<'a> {
     decoder: &'a mut Decoder<'a>,
     state: InstrDecoderState,
+    frames: Vec<InstrDecoderFrame>,
 }
 
 impl<'a> InstrDecoder<'a> {
-    pub(crate) fn new(decoder: &'a mut Decoder<'a>) -> Self {
+    pub(crate) fn new_with_allocs(decoder: &'a mut Decoder<'a>, allocs: InstrDecoderAllocs) -> Self {
+        let mut frames = allocs.frames;
+        frames.clear();
+        frames.push(InstrDecoderFrame::Block);
         Self {
             decoder,
             state: InstrDecoderState::Start,
+            frames,
         }
+    }
+
+    pub(crate) fn into_allocs(self) -> InstrDecoderAllocs {
+        InstrDecoderAllocs {
+            frames: self.frames,
+        }
+    }
+
+    pub(crate) fn is_at_end(&self) -> bool {
+        self.frames.is_empty()
     }
 
     pub(crate) fn decode<V>(
@@ -358,11 +373,29 @@ impl<'a> InstrDecoder<'a> {
         match self.decoder.read_byte()? {
             0x00 => visitor.visit_unreachable(),
             0x01 => visitor.visit_nop(),
-            0x02 => visitor.visit_block(self.decoder.decode()?),
-            0x03 => visitor.visit_loop(self.decoder.decode()?),
-            0x04 => visitor.visit_if(self.decoder.decode()?),
-            0x05 => visitor.visit_else(),
-            0x0B => visitor.visit_end(),
+            0x02 => {
+                self.frames.push(InstrDecoderFrame::Block);
+                visitor.visit_block(self.decoder.decode()?)
+            },
+            0x03 => {
+                self.frames.push(InstrDecoderFrame::Loop);
+                visitor.visit_loop(self.decoder.decode()?)
+            },
+            0x04 => {
+                self.frames.push(InstrDecoderFrame::If);
+                visitor.visit_if(self.decoder.decode()?)
+            },
+            0x05 => {
+                if self.frames.pop() != Some(InstrDecoderFrame::If) {
+                    return Err(DecodeError::new("unexpected else"))?;
+                }
+                self.frames.push(InstrDecoderFrame::Else);
+                visitor.visit_else()
+            },
+            0x0B => {
+                self.frames.pop();
+                visitor.visit_end()
+            },
             0x0C => visitor.visit_br(self.decoder.decode()?),
             0x0D => visitor.visit_br_if(self.decoder.decode()?),
             0x0E => {
@@ -659,4 +692,17 @@ enum InstrDecoderState {
     TypedSelect {
         val_type_count: u32,
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InstrDecoderFrame {
+    Block,
+    Loop,
+    If,
+    Else,
+}
+
+#[derive(Clone, Default, Debug)]
+pub(crate) struct InstrDecoderAllocs {
+    frames: Vec<InstrDecoderFrame>,
 }
