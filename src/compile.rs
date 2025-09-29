@@ -22,7 +22,7 @@ use {
         table::{TableEntity, TableEntityT},
         val::{UnguardedVal, ValType, ValTypeOf},
     },
-    std::{mem, ops::Deref, ptr},
+    std::{mem, ops::{Deref, Index, IndexMut}, ptr},
 };
 
 #[derive(Clone, Debug)]
@@ -90,7 +90,7 @@ impl Compiler {
             first_param_result_stack_idx: -(type_.call_frame_size() as isize),
             first_temp_stack_idx: local_count,
             max_stack_height: local_count,
-            regs: [None; 2],
+            regs: Regs::new(),
             code: CodeBuilder::new(),
         };
         compile.push_block(
@@ -159,7 +159,7 @@ struct Compile<'a> {
     first_param_result_stack_idx: isize,
     first_temp_stack_idx: usize,
     max_stack_height: usize,
-    regs: [Option<usize>; 2],
+    regs: Regs,
     code: CodeBuilder
 }
 
@@ -206,7 +206,7 @@ impl<'a> Compile<'a> {
         // The only exception is if one of the inputs occupies the output register. In that case,
         // the select instruction can safely overwrite the register, since the input will be
         // consumed by the instruction anyway.
-        let output_reg_idx = type_.reg_idx();
+        let output_reg_idx = type_.reg_name();
         if self.is_reg_occupied(output_reg_idx)
             && !self.opd(2).occupies_reg(output_reg_idx)
             && !self.opd(1).occupies_reg(output_reg_idx)
@@ -275,7 +275,7 @@ impl<'a> Compile<'a> {
         // The only exception is if the input occupies the output register. In that case, the
         // operation can safely overwrite the register, since the input will be consumed by the
         // operation anyway.
-        let output_reg_idx = output_type.reg_idx();
+        let output_reg_idx = output_type.reg_name();
         if self.is_reg_occupied(output_reg_idx) && !self.opd(0).occupies_reg(output_reg_idx) {
             self.preserve_reg(output_reg_idx);
         }
@@ -364,7 +364,7 @@ impl<'a> Compile<'a> {
         // The only exception is if the input occupies the output register. In that case, the
         // operation can safely overwrite the register, since the input will be consumed by the
         // operation anyway.
-        let output_reg_idx = output_type.reg_idx();
+        let output_reg_idx = output_type.reg_name();
         if self.is_reg_occupied(output_reg_idx) && !self.opd(0).occupies_reg(output_reg_idx) {
             self.preserve_reg(output_reg_idx);
         }
@@ -491,7 +491,7 @@ impl<'a> Compile<'a> {
         // The only exception is if one of the inputs occupies the output register. In that case,
         // the operation can safely overwrite the register, since the input will be consumed by the
         // operation anyway.
-        let output_reg_idx = output_type.reg_idx();
+        let output_reg_idx = output_type.reg_name();
         if self.is_reg_occupied(output_reg_idx)
             && !self.opd(1).occupies_reg(output_reg_idx)
             && !self.opd(0).occupies_reg(output_reg_idx)
@@ -688,7 +688,7 @@ impl<'a> Compile<'a> {
     // register on the stack if necessary.
     fn ensure_opd_not_reg(&mut self, opd_depth: usize) {
         if self.opd(opd_depth).is_reg {
-            self.preserve_reg(self.opd(opd_depth).type_.reg_idx());
+            self.preserve_reg(self.opd(opd_depth).type_.reg_name());
         }
     }
 
@@ -727,7 +727,7 @@ impl<'a> Compile<'a> {
     /// Pops an operand from the stack.
     fn pop_opd(&mut self) -> ValType {
         if self.opd(0).is_reg {
-            self.dealloc_reg(self.opd(0).type_.reg_idx());
+            self.dealloc_reg(self.opd(0).type_.reg_name());
         }
         let opd_idx = self.opds.len() - 1;
         if let Some(local_idx) = self.opds[opd_idx].local_idx {
@@ -776,42 +776,44 @@ impl<'a> Compile<'a> {
     // Methods for operating on registers.
 
     /// Returns `true` if the register with the given index is occupied.
-    fn is_reg_occupied(&self, reg_idx: usize) -> bool {
-        self.regs[reg_idx].is_some()
+    fn is_reg_occupied(&self, reg_name: RegName) -> bool {
+        self.regs[reg_name].is_used()
     }
 
     /// Allocates a register to the top operand.
     fn alloc_reg(&mut self) {
         debug_assert!(!self.opd(0).is_reg);
-        let reg_idx = self.opd(0).type_.reg_idx();
-        debug_assert!(!self.is_reg_occupied(reg_idx));
+        let reg_name = self.opd(0).type_.reg_name();
+        let reg = &mut self.regs[reg_name];
+        debug_assert!(!reg.is_used());
         let opd_idx = self.opds.len() - 1;
         self.opds[opd_idx].is_reg = true;
-        self.regs[reg_idx] = Some(opd_idx);
+        reg.alloc(opd_idx);
     }
 
-    /// Deallocates the register with the given index.
-    fn dealloc_reg(&mut self, reg_idx: usize) {
-        let opd_idx = self.regs[reg_idx].unwrap();
+    /// Deallocates the register with the given name.
+    fn dealloc_reg(&mut self, reg_name: RegName) {
+        let reg = &mut self.regs[reg_name];
+        let opd_idx = reg.opd_idx().unwrap();
         self.opds[opd_idx].is_reg = false;
-        self.regs[reg_idx] = None;
+        reg.dealloc();
     }
 
     /// Preserves the register with the given index by preserving the register operand that occupies
     /// it.
-    fn preserve_reg(&mut self, reg_idx: usize) {
-        let opd_idx = self.regs[reg_idx].unwrap();
+    fn preserve_reg(&mut self, reg_name: RegName) {
+        let opd_idx = self.regs[reg_name].opd_idx().unwrap();
         let opd_type = self.opds[opd_idx].type_;
         self.emit_instr(select_copy(opd_type, OpdKind::Reg));
         self.emit_stack_offset(self.temp_stack_idx(opd_idx));
-        self.dealloc_reg(reg_idx);
+        self.dealloc_reg(reg_name);
     }
 
     /// Preserves all registers by preserving the register operands that occupy them.
     fn preserve_all_regs(&mut self) {
-        for reg_idx in 0..self.regs.len() {
-            if self.is_reg_occupied(reg_idx) {
-                self.preserve_reg(reg_idx);
+        for reg_name in RegName::iter() {
+            if self.is_reg_occupied(reg_name) {
+                self.preserve_reg(reg_name);
             }
         }
     }
@@ -3035,9 +3037,9 @@ impl Opd {
         self.local_idx.is_some()
     }
 
-    /// Returns `true` if this operand occupies the register with the given index.
-    fn occupies_reg(&self, reg_idx: usize) -> bool {
-        self.is_reg && self.type_.reg_idx() == reg_idx
+    /// Returns `true` if this operand occupies the register with the given name.
+    fn occupies_reg(&self, reg_name: RegName) -> bool {
+        self.is_reg && self.type_.reg_name() == reg_name
     }
 
     /// Returns the kind of this operand (see [`OpdKind`]).
@@ -3065,6 +3067,120 @@ enum OpdKind {
     Stk,
     Reg,
     Imm,
+}
+
+// Registers
+
+/// A set of registers.
+#[derive(Debug)]
+struct Regs {
+    /// The integer accumulator register.
+    ia: Reg,
+    /// The single-precision floating-point accumulator register.
+    sa: Reg,
+    /// The double-precision floating-point accumulator register.
+    da: Reg,
+}
+
+impl Regs {
+    /// Creates a new set of registers.
+    fn new() -> Self {
+        Self {
+            ia: Reg::new(),
+            sa: Reg::new(),
+            da: Reg::new(),
+        }
+    }
+}
+
+impl Index<RegName> for Regs {
+    type Output = Reg;
+
+    fn index(&self, index: RegName) -> &Self::Output {
+        match index {
+            RegName::Ia => &self.ia,
+            RegName::Sa => &self.sa,
+            RegName::Da => &self.da,
+        }
+    }
+}
+
+impl IndexMut<RegName> for Regs {
+    fn index_mut(&mut self, index: RegName) -> &mut Self::Output {
+        match index {
+            RegName::Ia => &mut self.ia,
+            RegName::Sa => &mut self.sa,
+            RegName::Da => &mut self.da,
+        }
+    }
+}
+
+/// The name of a register.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RegName {
+    Ia,
+    Sa,
+    Da,
+}
+
+impl RegName {
+    /// Returns an iterator over all register names.
+    fn iter() -> impl Iterator<Item = RegName> {
+        [RegName::Ia, RegName::Sa, RegName::Da].into_iter()
+    }
+}
+
+/// A register.
+#[derive(Debug)]
+struct Reg {
+    opd_idx: Option<usize>,
+}
+
+impl Reg {
+    /// Creates a new register.
+    fn new() -> Self {
+        Self {
+            opd_idx: None,
+        }
+    }
+
+    /// Returns `true` if this register is free.
+    fn is_free(&self) -> bool {
+        self.opd_idx.is_none()
+    }
+
+    /// Returns `true` if this register is used.
+    fn is_used(&self) -> bool {
+        self.opd_idx.is_some()
+    }
+
+    /// Returns the index of the operand this register is allocated to, if any.
+    fn opd_idx(&self) -> Option<usize> {
+        self.opd_idx
+    }
+
+    /// Allocates this register to the operand with the given index.
+    fn alloc(&mut self, opd_idx: usize) {
+        debug_assert!(self.is_free(), "register is already used");
+        self.opd_idx = Some(opd_idx);
+    }
+
+    /// Deallocates this register.
+    fn dealloc(&mut self) {
+        debug_assert!(self.is_used(), "register is already free");
+        self.opd_idx = None;
+    }
+}
+
+impl ValType {
+    /// Returns the name of the register to be used for [`Val`]s of this [`ValType`].
+    fn reg_name(self) -> RegName {
+        match self {
+            ValType::I32 | ValType::I64 | ValType::FuncRef | ValType::ExternRef => RegName::Ia,
+            ValType::F32 => RegName::Sa,
+            ValType::F64 => RegName::Da,
+        }
+    }
 }
 
 // Instruction selection

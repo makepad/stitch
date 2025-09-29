@@ -332,14 +332,6 @@ impl ValType {
             _ => None,
         }
     }
-
-    /// Returns the index of the register to be used for [`Val`]s of this [`ValType`].
-    pub(crate) fn reg_idx(self) -> usize {
-        match self {
-            ValType::I32 | ValType::I64 | ValType::FuncRef | ValType::ExternRef => 0,
-            ValType::F32 | ValType::F64 => 1,
-        }
-    }
 }
 
 impl Decode for ValType {
