@@ -9,7 +9,7 @@ use {
         decode::DecodeError,
         downcast::{DowncastRef, DowncastMut},
         exec,
-        exec::{Imm, ReadReg, ReadFromPtr, Reg, Stk, ThreadedInstr, WriteReg, WriteToPtr},
+        exec::{ReadImm, ReadFromReg, ReadFromPtr, ReadReg, ReadStack, ThreadedInstr, WriteReg, WriteStack, WriteToReg, WriteToPtr},
         extern_ref::{ExternRef, UnguardedExternRef},
         func::{CompiledFuncBody, Func, FuncEntity, FuncType, InstrSlot, UncompiledFuncBody},
         func_ref::{FuncRef, UnguardedFuncRef},
@@ -238,7 +238,7 @@ impl<'a> Compile<'a> {
 
     fn compile_load<T>(&mut self, arg: MemArg) -> Result<(), DecodeError>
     where
-        T: ValTypeOf + ReadFromPtr + WriteReg,
+        T: ValTypeOf + ReadFromPtr + WriteToReg,
     {
         if self.block(0).is_unreachable {
             return Ok(());
@@ -252,7 +252,7 @@ impl<'a> Compile<'a> {
 
     fn compile_load_n<Dst, Src>(&mut self, arg: MemArg) -> Result<(), DecodeError>
     where
-        Dst: ValTypeOf + ExtendingCastFrom<Src> + WriteReg,
+        Dst: ValTypeOf + ExtendingCastFrom<Src> + WriteToReg,
         Src: ReadFromPtr + ExtendingCast,
     {
         if self.block(0).is_unreachable {
@@ -298,7 +298,7 @@ impl<'a> Compile<'a> {
 
     fn compile_store<T>(&mut self, arg: MemArg) -> Result<(), DecodeError>
     where
-        T: ReadReg + WriteToPtr,
+        T: ReadFromReg + WriteToPtr,
     {
         if self.block(0).is_unreachable {
             return Ok(());
@@ -311,7 +311,7 @@ impl<'a> Compile<'a> {
 
     fn compile_store_n<Src, Dst>(&mut self, arg: MemArg) -> Result<(), DecodeError>
     where
-        Src: ReadReg + WrappingCast,
+        Src: ReadFromReg + WrappingCast,
         Dst: WrappingCastFrom<Src> + WriteToPtr,
     {
         if self.block(0).is_unreachable {
@@ -341,9 +341,9 @@ impl<'a> Compile<'a> {
 
     fn compile_un_op<T, U>(&mut self) -> Result<(), DecodeError>
     where
-        T: ReadReg,
+        T: ReadFromReg,
         U: UnOp<T>,
-        U::Output: ValTypeOf + WriteReg,
+        U::Output: ValTypeOf + WriteToReg,
     {
         if self.block(0).is_unreachable {
             return Ok(());
@@ -385,7 +385,7 @@ impl<'a> Compile<'a> {
 
     fn compile_rel_op<T, B>(&mut self) -> Result<(), DecodeError>
     where
-        T: ReadReg,
+        T: ReadFromReg,
         B: BinOp<T, Output = i32>,
     {
         if self.block(0).is_unreachable {
@@ -401,7 +401,7 @@ impl<'a> Compile<'a> {
 
     fn compile_br_if_rel_op<T, B>(&mut self, label_idx: u32) -> Result<(), DecodeError>
     where
-        T: ReadReg,
+        T: ReadFromReg,
         B: BinOp<T, Output = i32>,
     {
         self.compile_br_if_rel_op_inner(
@@ -465,9 +465,9 @@ impl<'a> Compile<'a> {
 
     fn compile_bin_op<T, B>(&mut self) -> Result<(), DecodeError>
     where
-        T: ReadReg,
+        T: ReadFromReg,
         B: BinOp<T>,
-        B::Output: ValTypeOf + WriteReg,
+        B::Output: ValTypeOf + WriteToReg,
     {
         if self.block(0).is_unreachable {
             return Ok(());
@@ -1565,7 +1565,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         let func = self.instance.func(func_idx).unwrap();
 
         // Emit the instruction.
-        self.emit_instr(exec::copy::<UnguardedFuncRef, Imm, Stk> as ThreadedInstr);
+        self.emit_instr(exec::copy::<UnguardedFuncRef, ReadImm, WriteStack> as ThreadedInstr);
         
         // Emit an unguarded handle to the [`Func`].
         self.emit(func.to_unguarded(self.store.id()));
@@ -2110,7 +2110,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // The cast to [`ThreadedInstr`] is necessary here, because otherwise we would emit a
         // function item instead of a function pointer.
-        self.emit_instr(exec::memory_size::<Stk> as ThreadedInstr);
+        self.emit_instr(exec::memory_size::<WriteStack> as ThreadedInstr);
 
         // Emit an unguarded handle to the [`Mem`].
         self.emit(mem.to_unguarded(self.store.id()));
@@ -2141,7 +2141,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // The cast to [`ThreadedInstr`] is necessary here, because otherwise we would emit a
         // function item instead of a function pointer.
-        self.emit_instr(exec::memory_grow::<Stk, Stk> as ThreadedInstr);
+        self.emit_instr(exec::memory_grow::<ReadStack, WriteStack> as ThreadedInstr);
 
         // Emit the input and pop it from the stack.
         self.emit_and_pop_opd();
@@ -2177,7 +2177,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // The cast to [`ThreadedInstr`] is necessary here, because otherwise we would emit a
         // function item instead of a function pointer.
-        self.emit_instr(exec::memory_fill::<Stk, Stk, Stk> as ThreadedInstr);
+        self.emit_instr(exec::memory_fill::<ReadStack, ReadStack, ReadStack> as ThreadedInstr);
 
         // Emit the inputs and pop them from the stack.
         for _ in 0..3 {
@@ -2212,7 +2212,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // The cast to [`ThreadedInstr`] is necessary here, because otherwise we would emit a
         // function item instead of a function pointer.
-        self.emit_instr(exec::memory_copy::<Stk, Stk, Stk> as ThreadedInstr);
+        self.emit_instr(exec::memory_copy::<ReadStack, ReadStack, ReadStack> as ThreadedInstr);
 
         // Emit the inputs and pop them from the stack.
         for _ in 0..3 {
@@ -2248,7 +2248,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         //
         // The cast to [`ThreadedInstr`] is necessary here, because otherwise we would emit a
         // function item instead of a function pointer.
-        self.emit_instr(exec::memory_init::<Stk, Stk, Stk> as ThreadedInstr);
+        self.emit_instr(exec::memory_init::<ReadStack, ReadStack, ReadStack> as ThreadedInstr);
 
         // Emit the inputs and pop them from the stack.
         for _ in 0..3 {
@@ -3076,70 +3076,70 @@ enum OpdKind {
 
 fn select_br_if(kind: OpdKind) -> ThreadedInstr {
     match kind {
-        OpdKind::Imm => exec::br_if::<Imm>,
-        OpdKind::Stk => exec::br_if::<Stk>,
-        OpdKind::Reg => exec::br_if::<Reg>,
+        OpdKind::Imm => exec::br_if::<ReadImm>,
+        OpdKind::Stk => exec::br_if::<ReadStack>,
+        OpdKind::Reg => exec::br_if::<ReadReg>,
     }
 }
 
 fn select_br_if_not(kind: OpdKind) -> ThreadedInstr {
     match kind {
-        OpdKind::Imm => exec::br_if_not::<Imm>,
-        OpdKind::Stk => exec::br_if_not::<Stk>,
-        OpdKind::Reg => exec::br_if_not::<Reg>,
+        OpdKind::Imm => exec::br_if_not::<ReadImm>,
+        OpdKind::Stk => exec::br_if_not::<ReadStack>,
+        OpdKind::Reg => exec::br_if_not::<ReadReg>,
     }
 }
 
 fn select_br_if_rel_op<T, B>(input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr
 where
-    T: ReadReg,
+    T: ReadFromReg,
     B: BinOp<T, Output = i32>,
-    B::Output: WriteReg
+    B::Output: WriteToReg
 {
     match (input_0, input_1) {
-        (OpdKind::Imm, OpdKind::Imm) => exec::br_if_rel_op::<T, B, Imm, Imm>,
-        (OpdKind::Stk, OpdKind::Imm) => exec::br_if_rel_op::<T, B, Stk, Imm>,
-        (OpdKind::Reg, OpdKind::Imm) => exec::br_if_rel_op::<T, B, Reg, Imm>,
-        (OpdKind::Imm, OpdKind::Stk) => exec::br_if_rel_op::<T, B, Imm, Stk>,
-        (OpdKind::Stk, OpdKind::Stk) => exec::br_if_rel_op::<T, B, Stk, Stk>,
-        (OpdKind::Reg, OpdKind::Stk) => exec::br_if_rel_op::<T, B, Reg, Stk>,
-        (OpdKind::Imm, OpdKind::Reg) => exec::br_if_rel_op::<T, B, Imm, Reg>,
-        (OpdKind::Stk, OpdKind::Reg) => exec::br_if_rel_op::<T, B, Stk, Reg>,
-        (OpdKind::Reg, OpdKind::Reg) => exec::br_if_rel_op::<T, B, Reg, Reg>,
+        (OpdKind::Imm, OpdKind::Imm) => exec::br_if_rel_op::<T, B, ReadImm, ReadImm>,
+        (OpdKind::Stk, OpdKind::Imm) => exec::br_if_rel_op::<T, B, ReadStack, ReadImm>,
+        (OpdKind::Reg, OpdKind::Imm) => exec::br_if_rel_op::<T, B, ReadReg, ReadImm>,
+        (OpdKind::Imm, OpdKind::Stk) => exec::br_if_rel_op::<T, B, ReadImm, ReadStack>,
+        (OpdKind::Stk, OpdKind::Stk) => exec::br_if_rel_op::<T, B, ReadStack, ReadStack>,
+        (OpdKind::Reg, OpdKind::Stk) => exec::br_if_rel_op::<T, B, ReadReg, ReadStack>,
+        (OpdKind::Imm, OpdKind::Reg) => exec::br_if_rel_op::<T, B, ReadImm, ReadReg>,
+        (OpdKind::Stk, OpdKind::Reg) => exec::br_if_rel_op::<T, B, ReadStack, ReadReg>,
+        (OpdKind::Reg, OpdKind::Reg) => exec::br_if_rel_op::<T, B, ReadReg, ReadReg>,
     }
 }
 
 fn select_br_if_not_rel_op<T, B>(input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr
 where
-    T: ReadReg,
+    T: ReadFromReg,
     B: BinOp<T, Output = i32>,
-    B::Output: WriteReg
+    B::Output: WriteToReg
 {
     match (input_0, input_1) {
-        (OpdKind::Imm, OpdKind::Imm) => exec::br_if_not_rel_op::<T, B, Imm, Imm>,
-        (OpdKind::Stk, OpdKind::Imm) => exec::br_if_not_rel_op::<T, B, Stk, Imm>,
-        (OpdKind::Reg, OpdKind::Imm) => exec::br_if_not_rel_op::<T, B, Reg, Imm>,
-        (OpdKind::Imm, OpdKind::Stk) => exec::br_if_not_rel_op::<T, B, Imm, Stk>,
-        (OpdKind::Stk, OpdKind::Stk) => exec::br_if_not_rel_op::<T, B, Stk, Stk>,
-        (OpdKind::Reg, OpdKind::Stk) => exec::br_if_not_rel_op::<T, B, Reg, Stk>,
-        (OpdKind::Imm, OpdKind::Reg) => exec::br_if_not_rel_op::<T, B, Imm, Reg>,
-        (OpdKind::Stk, OpdKind::Reg) => exec::br_if_not_rel_op::<T, B, Stk, Reg>,
-        (OpdKind::Reg, OpdKind::Reg) => exec::br_if_not_rel_op::<T, B, Reg, Reg>,
+        (OpdKind::Imm, OpdKind::Imm) => exec::br_if_not_rel_op::<T, B, ReadImm, ReadImm>,
+        (OpdKind::Stk, OpdKind::Imm) => exec::br_if_not_rel_op::<T, B, ReadStack, ReadImm>,
+        (OpdKind::Reg, OpdKind::Imm) => exec::br_if_not_rel_op::<T, B, ReadReg, ReadImm>,
+        (OpdKind::Imm, OpdKind::Stk) => exec::br_if_not_rel_op::<T, B, ReadImm, ReadStack>,
+        (OpdKind::Stk, OpdKind::Stk) => exec::br_if_not_rel_op::<T, B, ReadStack, ReadStack>,
+        (OpdKind::Reg, OpdKind::Stk) => exec::br_if_not_rel_op::<T, B, ReadReg, ReadStack>,
+        (OpdKind::Imm, OpdKind::Reg) => exec::br_if_not_rel_op::<T, B, ReadImm, ReadReg>,
+        (OpdKind::Stk, OpdKind::Reg) => exec::br_if_not_rel_op::<T, B, ReadStack, ReadReg>,
+        (OpdKind::Reg, OpdKind::Reg) => exec::br_if_not_rel_op::<T, B, ReadReg, ReadReg>,
     }
 }
 
 fn select_br_table(kind: OpdKind) -> ThreadedInstr {
     match kind {
-        OpdKind::Imm => exec::br_table::<Imm>,
-        OpdKind::Stk => exec::br_table::<Stk>,
-        OpdKind::Reg => exec::br_table::<Reg>,
+        OpdKind::Imm => exec::br_table::<ReadImm>,
+        OpdKind::Stk => exec::br_table::<ReadStack>,
+        OpdKind::Reg => exec::br_table::<ReadReg>,
     }
 }
 
 fn select_ref_null(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::copy::<UnguardedFuncRef, Imm, Stk>,
-        RefType::ExternRef => exec::copy::<UnguardedExternRef, Imm, Stk>,
+        RefType::FuncRef => exec::copy::<UnguardedFuncRef, ReadImm, WriteStack>,
+        RefType::ExternRef => exec::copy::<UnguardedExternRef, ReadImm, WriteStack>,
     }
 }
 
@@ -3163,47 +3163,47 @@ fn select_select(type_: ValType, input_0: OpdKind, input_1: OpdKind, input_2: Op
 
 fn select_select_inner<T>(input_0: OpdKind, input_1: OpdKind, input_2: OpdKind) -> ThreadedInstr
 where
-    T: ReadReg + WriteReg
+    T: ReadFromReg + WriteToReg
 {
     match (input_0, input_1, input_2) {
-        (OpdKind::Imm, OpdKind::Imm, OpdKind::Imm) => exec::select::<T, Imm, Imm, Imm, Reg>,
-        (OpdKind::Stk, OpdKind::Imm, OpdKind::Imm) => exec::select::<T, Stk, Imm, Imm, Reg>,
-        (OpdKind::Reg, OpdKind::Imm, OpdKind::Imm) => exec::select::<T, Reg, Imm, Imm, Reg>,
-        (OpdKind::Imm, OpdKind::Stk, OpdKind::Imm) => exec::select::<T, Imm, Stk, Imm, Reg>,
-        (OpdKind::Stk, OpdKind::Stk, OpdKind::Imm) => exec::select::<T, Stk, Stk, Imm, Reg>,
-        (OpdKind::Reg, OpdKind::Stk, OpdKind::Imm) => exec::select::<T, Reg, Stk, Imm, Reg>,
-        (OpdKind::Imm, OpdKind::Reg, OpdKind::Imm) => exec::select::<T, Imm, Reg, Imm, Reg>,
-        (OpdKind::Stk, OpdKind::Reg, OpdKind::Imm) => exec::select::<T, Stk, Reg, Imm, Reg>,
-        (OpdKind::Reg, OpdKind::Reg, OpdKind::Imm) => exec::select::<T, Reg, Reg, Imm, Reg>,
-        (OpdKind::Imm, OpdKind::Imm, OpdKind::Stk) => exec::select::<T, Imm, Imm, Stk, Reg>,
-        (OpdKind::Stk, OpdKind::Imm, OpdKind::Stk) => exec::select::<T, Stk, Imm, Stk, Reg>,
-        (OpdKind::Reg, OpdKind::Imm, OpdKind::Stk) => exec::select::<T, Reg, Imm, Stk, Reg>,
-        (OpdKind::Imm, OpdKind::Stk, OpdKind::Stk) => exec::select::<T, Imm, Stk, Stk, Reg>,
-        (OpdKind::Stk, OpdKind::Stk, OpdKind::Stk) => exec::select::<T, Stk, Stk, Stk, Reg>,
-        (OpdKind::Reg, OpdKind::Stk, OpdKind::Stk) => exec::select::<T, Reg, Stk, Stk, Reg>,
-        (OpdKind::Imm, OpdKind::Reg, OpdKind::Stk) => exec::select::<T, Imm, Reg, Stk, Reg>,
-        (OpdKind::Stk, OpdKind::Reg, OpdKind::Stk) => exec::select::<T, Stk, Reg, Stk, Reg>,
-        (OpdKind::Reg, OpdKind::Reg, OpdKind::Stk) => exec::select::<T, Reg, Reg, Stk, Reg>,
-        (OpdKind::Imm, OpdKind::Imm, OpdKind::Reg) => exec::select::<T, Imm, Imm, Reg, Reg>,
-        (OpdKind::Stk, OpdKind::Imm, OpdKind::Reg) => exec::select::<T, Stk, Imm, Reg, Reg>,
-        (OpdKind::Reg, OpdKind::Imm, OpdKind::Reg) => exec::select::<T, Reg, Imm, Reg, Reg>,
-        (OpdKind::Imm, OpdKind::Stk, OpdKind::Reg) => exec::select::<T, Imm, Stk, Reg, Reg>,
-        (OpdKind::Stk, OpdKind::Stk, OpdKind::Reg) => exec::select::<T, Stk, Stk, Reg, Reg>,
-        (OpdKind::Reg, OpdKind::Stk, OpdKind::Reg) => exec::select::<T, Reg, Stk, Reg, Reg>,
-        (OpdKind::Imm, OpdKind::Reg, OpdKind::Reg) => exec::select::<T, Imm, Reg, Reg, Reg>,
-        (OpdKind::Stk, OpdKind::Reg, OpdKind::Reg) => exec::select::<T, Stk, Reg, Reg, Reg>,
-        (OpdKind::Reg, OpdKind::Reg, OpdKind::Reg) => exec::select::<T, Reg, Reg, Reg, Reg>,
+        (OpdKind::Imm, OpdKind::Imm, OpdKind::Imm) => exec::select::<T, ReadImm, ReadImm, ReadImm, WriteReg>,
+        (OpdKind::Stk, OpdKind::Imm, OpdKind::Imm) => exec::select::<T, ReadStack, ReadImm, ReadImm, WriteReg>,
+        (OpdKind::Reg, OpdKind::Imm, OpdKind::Imm) => exec::select::<T, ReadReg, ReadImm, ReadImm, WriteReg>,
+        (OpdKind::Imm, OpdKind::Stk, OpdKind::Imm) => exec::select::<T, ReadImm, ReadStack, ReadImm, WriteReg>,
+        (OpdKind::Stk, OpdKind::Stk, OpdKind::Imm) => exec::select::<T, ReadStack, ReadStack, ReadImm, WriteReg>,
+        (OpdKind::Reg, OpdKind::Stk, OpdKind::Imm) => exec::select::<T, ReadReg, ReadStack, ReadImm, WriteReg>,
+        (OpdKind::Imm, OpdKind::Reg, OpdKind::Imm) => exec::select::<T, ReadImm, ReadReg, ReadImm, WriteReg>,
+        (OpdKind::Stk, OpdKind::Reg, OpdKind::Imm) => exec::select::<T, ReadStack, ReadReg, ReadImm, WriteReg>,
+        (OpdKind::Reg, OpdKind::Reg, OpdKind::Imm) => exec::select::<T, ReadReg, ReadReg, ReadImm, WriteReg>,
+        (OpdKind::Imm, OpdKind::Imm, OpdKind::Stk) => exec::select::<T, ReadImm, ReadImm, ReadStack, WriteReg>,
+        (OpdKind::Stk, OpdKind::Imm, OpdKind::Stk) => exec::select::<T, ReadStack, ReadImm, ReadStack, WriteReg>,
+        (OpdKind::Reg, OpdKind::Imm, OpdKind::Stk) => exec::select::<T, ReadReg, ReadImm, ReadStack, WriteReg>,
+        (OpdKind::Imm, OpdKind::Stk, OpdKind::Stk) => exec::select::<T, ReadImm, ReadStack, ReadStack, WriteReg>,
+        (OpdKind::Stk, OpdKind::Stk, OpdKind::Stk) => exec::select::<T, ReadStack, ReadStack, ReadStack, WriteReg>,
+        (OpdKind::Reg, OpdKind::Stk, OpdKind::Stk) => exec::select::<T, ReadReg, ReadStack, ReadStack, WriteReg>,
+        (OpdKind::Imm, OpdKind::Reg, OpdKind::Stk) => exec::select::<T, ReadImm, ReadReg, ReadStack, WriteReg>,
+        (OpdKind::Stk, OpdKind::Reg, OpdKind::Stk) => exec::select::<T, ReadStack, ReadReg, ReadStack, WriteReg>,
+        (OpdKind::Reg, OpdKind::Reg, OpdKind::Stk) => exec::select::<T, ReadReg, ReadReg, ReadStack, WriteReg>,
+        (OpdKind::Imm, OpdKind::Imm, OpdKind::Reg) => exec::select::<T, ReadImm, ReadImm, ReadReg, WriteReg>,
+        (OpdKind::Stk, OpdKind::Imm, OpdKind::Reg) => exec::select::<T, ReadStack, ReadImm, ReadReg, WriteReg>,
+        (OpdKind::Reg, OpdKind::Imm, OpdKind::Reg) => exec::select::<T, ReadReg, ReadImm, ReadReg, WriteReg>,
+        (OpdKind::Imm, OpdKind::Stk, OpdKind::Reg) => exec::select::<T, ReadImm, ReadStack, ReadReg, WriteReg>,
+        (OpdKind::Stk, OpdKind::Stk, OpdKind::Reg) => exec::select::<T, ReadStack, ReadStack, ReadReg, WriteReg>,
+        (OpdKind::Reg, OpdKind::Stk, OpdKind::Reg) => exec::select::<T, ReadReg, ReadStack, ReadReg, WriteReg>,
+        (OpdKind::Imm, OpdKind::Reg, OpdKind::Reg) => exec::select::<T, ReadImm, ReadReg, ReadReg, WriteReg>,
+        (OpdKind::Stk, OpdKind::Reg, OpdKind::Reg) => exec::select::<T, ReadStack, ReadReg, ReadReg, WriteReg>,
+        (OpdKind::Reg, OpdKind::Reg, OpdKind::Reg) => exec::select::<T, ReadReg, ReadReg, ReadReg, WriteReg>,
     }
 }
 
 fn select_global_get(type_: ValType) -> ThreadedInstr {
     match type_ {
-        ValType::I32 => exec::global_get::<i32, Stk>,
-        ValType::I64 => exec::global_get::<i64, Stk>,
-        ValType::F32 => exec::global_get::<f32, Stk>,
-        ValType::F64 => exec::global_get::<f64, Stk>,
-        ValType::FuncRef => exec::global_get::<UnguardedFuncRef, Stk>,
-        ValType::ExternRef => exec::global_get::<UnguardedExternRef, Stk>,
+        ValType::I32 => exec::global_get::<i32, WriteStack>,
+        ValType::I64 => exec::global_get::<i64, WriteStack>,
+        ValType::F32 => exec::global_get::<f32, WriteStack>,
+        ValType::F64 => exec::global_get::<f64, WriteStack>,
+        ValType::FuncRef => exec::global_get::<UnguardedFuncRef, WriteStack>,
+        ValType::ExternRef => exec::global_get::<UnguardedExternRef, WriteStack>,
     }
 }
 
@@ -3221,12 +3221,12 @@ fn select_global_set(type_: ValType, input: OpdKind) -> ThreadedInstr {
 fn select_global_set_inner<T>(input: OpdKind) -> ThreadedInstr
 where
     GlobalEntityT<T>: DowncastMut<GlobalEntity>,
-    T: Copy + ReadReg
+    T: Copy + ReadFromReg
 {
     match input {
-        OpdKind::Imm => exec::global_set::<T, Imm>,
-        OpdKind::Stk => exec::global_set::<T, Stk>,
-        OpdKind::Reg => exec::global_set::<T, Reg>,
+        OpdKind::Imm => exec::global_set::<T, ReadImm>,
+        OpdKind::Stk => exec::global_set::<T, ReadStack>,
+        OpdKind::Reg => exec::global_set::<T, ReadReg>,
     }
 }
 
@@ -3240,12 +3240,12 @@ fn select_table_get(type_: RefType, input: OpdKind) -> ThreadedInstr {
 fn select_table_get_inner<T>(input: OpdKind) -> ThreadedInstr
 where
     TableEntityT<T>: DowncastRef<TableEntity>,
-    T: Copy + ReadReg + WriteReg
+    T: Copy + ReadFromReg + WriteToReg
 {
     match input {
-        OpdKind::Imm => exec::table_get::<T, Imm, Stk>,
-        OpdKind::Stk => exec::table_get::<T, Stk, Stk>,
-        OpdKind::Reg => exec::table_get::<T, Reg, Stk>,
+        OpdKind::Imm => exec::table_get::<T, ReadImm, WriteStack>,
+        OpdKind::Stk => exec::table_get::<T, ReadStack, WriteStack>,
+        OpdKind::Reg => exec::table_get::<T, ReadReg, WriteStack>,
     }
 }
 
@@ -3259,53 +3259,53 @@ fn select_table_set(type_: RefType, input_0: OpdKind, input_1: OpdKind) -> Threa
 fn select_table_set_inner<T>(input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr
 where
     TableEntityT<T>: DowncastMut<TableEntity>,
-    T: Copy + ReadReg
+    T: Copy + ReadFromReg
 {
     match (input_0, input_1) {
-        (OpdKind::Imm, OpdKind::Imm) => exec::table_set::<T, Imm, Imm>,
-        (OpdKind::Stk, OpdKind::Imm) => exec::table_set::<T, Stk, Imm>,
-        (OpdKind::Reg, OpdKind::Imm) => exec::table_set::<T, Reg, Imm>,
-        (OpdKind::Imm, OpdKind::Stk) => exec::table_set::<T, Imm, Stk>,
-        (OpdKind::Stk, OpdKind::Stk) => exec::table_set::<T, Stk, Stk>,
-        (OpdKind::Reg, OpdKind::Stk) => exec::table_set::<T, Reg, Stk>,
-        (OpdKind::Imm, OpdKind::Reg) => exec::table_set::<T, Imm, Reg>,
-        (OpdKind::Stk, OpdKind::Reg) => exec::table_set::<T, Stk, Reg>,
-        (OpdKind::Reg, OpdKind::Reg) => exec::table_set::<T, Reg, Reg>,
+        (OpdKind::Imm, OpdKind::Imm) => exec::table_set::<T, ReadImm, ReadImm>,
+        (OpdKind::Stk, OpdKind::Imm) => exec::table_set::<T, ReadStack, ReadImm>,
+        (OpdKind::Reg, OpdKind::Imm) => exec::table_set::<T, ReadReg, ReadImm>,
+        (OpdKind::Imm, OpdKind::Stk) => exec::table_set::<T, ReadImm, ReadStack>,
+        (OpdKind::Stk, OpdKind::Stk) => exec::table_set::<T, ReadStack, ReadStack>,
+        (OpdKind::Reg, OpdKind::Stk) => exec::table_set::<T, ReadReg, ReadStack>,
+        (OpdKind::Imm, OpdKind::Reg) => exec::table_set::<T, ReadImm, ReadReg>,
+        (OpdKind::Stk, OpdKind::Reg) => exec::table_set::<T, ReadStack, ReadReg>,
+        (OpdKind::Reg, OpdKind::Reg) => exec::table_set::<T, ReadReg, ReadReg>,
     }
 }
 
 fn select_table_size(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::table_size::<UnguardedFuncRef, Stk>,
-        RefType::ExternRef => exec::table_size::<UnguardedExternRef, Stk>,
+        RefType::FuncRef => exec::table_size::<UnguardedFuncRef, WriteStack>,
+        RefType::ExternRef => exec::table_size::<UnguardedExternRef, WriteStack>,
     }
 }
 
 fn select_table_grow(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::table_grow::<UnguardedFuncRef, Stk, Stk, Stk>,
-        RefType::ExternRef => exec::table_grow::<UnguardedExternRef, Stk, Stk, Stk>,
+        RefType::FuncRef => exec::table_grow::<UnguardedFuncRef, ReadStack, ReadStack, WriteStack>,
+        RefType::ExternRef => exec::table_grow::<UnguardedExternRef, ReadStack, ReadStack, WriteStack>,
     }
 }
 
 fn select_table_fill(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::table_fill::<UnguardedFuncRef, Stk, Stk, Stk>,
-        RefType::ExternRef => exec::table_fill::<UnguardedExternRef, Stk, Stk, Stk>,
+        RefType::FuncRef => exec::table_fill::<UnguardedFuncRef, ReadStack, ReadStack, ReadStack>,
+        RefType::ExternRef => exec::table_fill::<UnguardedExternRef, ReadStack, ReadStack, ReadStack>,
     }
 }
 
 fn select_table_copy(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::table_copy::<UnguardedFuncRef, Stk, Stk, Stk>,
-        RefType::ExternRef => exec::table_copy::<UnguardedExternRef, Stk, Stk, Stk>,
+        RefType::FuncRef => exec::table_copy::<UnguardedFuncRef, ReadStack, ReadStack, ReadStack>,
+        RefType::ExternRef => exec::table_copy::<UnguardedExternRef, ReadStack, ReadStack, ReadStack>,
     }
 }
 
 fn select_table_init(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::table_init::<UnguardedFuncRef, Stk, Stk, Stk>,
-        RefType::ExternRef => exec::table_init::<UnguardedExternRef, Stk, Stk, Stk>,
+        RefType::FuncRef => exec::table_init::<UnguardedFuncRef, ReadStack, ReadStack, ReadStack>,
+        RefType::ExternRef => exec::table_init::<UnguardedExternRef, ReadStack, ReadStack, ReadStack>,
     }
 }
 
@@ -3318,91 +3318,91 @@ fn select_elem_drop(type_: RefType) -> ThreadedInstr {
 
 fn select_load<T>(input: OpdKind) -> ThreadedInstr
 where
-    T: ReadFromPtr + WriteReg
+    T: ReadFromPtr + WriteToReg
 {
     match input {
-        OpdKind::Imm => exec::load::<T, Imm, Reg>,
-        OpdKind::Stk => exec::load::<T, Stk, Reg>,
-        OpdKind::Reg => exec::load::<T, Reg, Reg>,
+        OpdKind::Imm => exec::load::<T, ReadImm, WriteReg>,
+        OpdKind::Stk => exec::load::<T, ReadStack, WriteReg>,
+        OpdKind::Reg => exec::load::<T, ReadReg, WriteReg>,
     }
 }
 
 fn select_load_n<Dst, Src>(input: OpdKind) -> ThreadedInstr
 where
-    Dst: ExtendingCastFrom<Src> + WriteReg,
+    Dst: ExtendingCastFrom<Src> + WriteToReg,
     Src: ReadFromPtr + ExtendingCast,
 {
     match input {
-        OpdKind::Imm => exec::load_n::<Dst, Src, Imm, Reg>,
-        OpdKind::Stk => exec::load_n::<Dst, Src, Stk, Reg>,
-        OpdKind::Reg => exec::load_n::<Dst, Src, Reg, Reg>,
+        OpdKind::Imm => exec::load_n::<Dst, Src, ReadImm, WriteReg>,
+        OpdKind::Stk => exec::load_n::<Dst, Src, ReadStack, WriteReg>,
+        OpdKind::Reg => exec::load_n::<Dst, Src, ReadReg, WriteReg>,
     }
 }
 
 fn select_store<T>(input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr
 where
-    T: ReadReg + WriteToPtr
+    T: ReadFromReg + WriteToPtr
 {
     match (input_0, input_1) {
-        (OpdKind::Imm, OpdKind::Imm) => exec::store::<T, Imm, Imm>,
-        (OpdKind::Stk, OpdKind::Imm) => exec::store::<T, Stk, Imm>,
-        (OpdKind::Reg, OpdKind::Imm) => exec::store::<T, Reg, Imm>,
-        (OpdKind::Imm, OpdKind::Stk) => exec::store::<T, Imm, Stk>,
-        (OpdKind::Stk, OpdKind::Stk) => exec::store::<T, Stk, Stk>,
-        (OpdKind::Reg, OpdKind::Stk) => exec::store::<T, Reg, Stk>,
-        (OpdKind::Imm, OpdKind::Reg) => exec::store::<T, Imm, Reg>,
-        (OpdKind::Stk, OpdKind::Reg) => exec::store::<T, Stk, Reg>,
-        (OpdKind::Reg, OpdKind::Reg) => exec::store::<T, Reg, Reg>,
+        (OpdKind::Imm, OpdKind::Imm) => exec::store::<T, ReadImm, ReadImm>,
+        (OpdKind::Stk, OpdKind::Imm) => exec::store::<T, ReadStack, ReadImm>,
+        (OpdKind::Reg, OpdKind::Imm) => exec::store::<T, ReadReg, ReadImm>,
+        (OpdKind::Imm, OpdKind::Stk) => exec::store::<T, ReadImm, ReadStack>,
+        (OpdKind::Stk, OpdKind::Stk) => exec::store::<T, ReadStack, ReadStack>,
+        (OpdKind::Reg, OpdKind::Stk) => exec::store::<T, ReadReg, ReadStack>,
+        (OpdKind::Imm, OpdKind::Reg) => exec::store::<T, ReadImm, ReadReg>,
+        (OpdKind::Stk, OpdKind::Reg) => exec::store::<T, ReadStack, ReadReg>,
+        (OpdKind::Reg, OpdKind::Reg) => exec::store::<T, ReadReg, ReadReg>,
     }
 }
 
 fn select_store_n<Src, Dst>(input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr
 where
-    Src: ReadReg + WrappingCast,
+    Src: ReadFromReg + WrappingCast,
     Dst: WrappingCastFrom<Src> + WriteToPtr,
 {
     match (input_0, input_1) {
-        (OpdKind::Imm, OpdKind::Imm) => exec::store_n::<Src, Dst, Imm, Imm>,
-        (OpdKind::Stk, OpdKind::Imm) => exec::store_n::<Src, Dst, Stk, Imm>,
-        (OpdKind::Reg, OpdKind::Imm) => exec::store_n::<Src, Dst, Reg, Imm>,
-        (OpdKind::Imm, OpdKind::Stk) => exec::store_n::<Src, Dst, Imm, Stk>,
-        (OpdKind::Stk, OpdKind::Stk) => exec::store_n::<Src, Dst, Stk, Stk>,
-        (OpdKind::Reg, OpdKind::Stk) => exec::store_n::<Src, Dst, Reg, Stk>,
-        (OpdKind::Imm, OpdKind::Reg) => exec::store_n::<Src, Dst, Imm, Reg>,
-        (OpdKind::Stk, OpdKind::Reg) => exec::store_n::<Src, Dst, Stk, Reg>,
-        (OpdKind::Reg, OpdKind::Reg) => exec::store_n::<Src, Dst, Reg, Reg>,
+        (OpdKind::Imm, OpdKind::Imm) => exec::store_n::<Src, Dst, ReadImm, ReadImm>,
+        (OpdKind::Stk, OpdKind::Imm) => exec::store_n::<Src, Dst, ReadStack, ReadImm>,
+        (OpdKind::Reg, OpdKind::Imm) => exec::store_n::<Src, Dst, ReadReg, ReadImm>,
+        (OpdKind::Imm, OpdKind::Stk) => exec::store_n::<Src, Dst, ReadImm, ReadStack>,
+        (OpdKind::Stk, OpdKind::Stk) => exec::store_n::<Src, Dst, ReadStack, ReadStack>,
+        (OpdKind::Reg, OpdKind::Stk) => exec::store_n::<Src, Dst, ReadReg, ReadStack>,
+        (OpdKind::Imm, OpdKind::Reg) => exec::store_n::<Src, Dst, ReadImm, ReadReg>,
+        (OpdKind::Stk, OpdKind::Reg) => exec::store_n::<Src, Dst, ReadStack, ReadReg>,
+        (OpdKind::Reg, OpdKind::Reg) => exec::store_n::<Src, Dst, ReadReg, ReadReg>,
     }
 }
 
 fn select_un_op<T, U>(input: OpdKind) -> ThreadedInstr
 where
-    T: ReadReg,
+    T: ReadFromReg,
     U: UnOp<T>,
-    U::Output: WriteReg
+    U::Output: WriteToReg
 {
     match input {
-        OpdKind::Imm => exec::un_op::<T, U, Imm, Reg>,
-        OpdKind::Stk => exec::un_op::<T, U, Stk, Reg>,
-        OpdKind::Reg => exec::un_op::<T, U, Reg, Reg>,
+        OpdKind::Imm => exec::un_op::<T, U, ReadImm, WriteReg>,
+        OpdKind::Stk => exec::un_op::<T, U, ReadStack, WriteReg>,
+        OpdKind::Reg => exec::un_op::<T, U, ReadReg, WriteReg>,
     }
 }
 
 fn select_bin_op<T, B>(input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr
 where
-    T: ReadReg,
+    T: ReadFromReg,
     B: BinOp<T>,
-    B::Output: WriteReg
+    B::Output: WriteToReg
 {
     match (input_0, input_1) {
-        (OpdKind::Imm, OpdKind::Imm) => exec::bin_op::<T, B, Imm, Imm, Reg>,
-        (OpdKind::Stk, OpdKind::Imm) => exec::bin_op::<T, B, Stk, Imm, Reg>,
-        (OpdKind::Reg, OpdKind::Imm) => exec::bin_op::<T, B, Reg, Imm, Reg>,
-        (OpdKind::Imm, OpdKind::Stk) => exec::bin_op::<T, B, Imm, Stk, Reg>,
-        (OpdKind::Stk, OpdKind::Stk) => exec::bin_op::<T, B, Stk, Stk, Reg>,
-        (OpdKind::Reg, OpdKind::Stk) => exec::bin_op::<T, B, Reg, Stk, Reg>,
-        (OpdKind::Imm, OpdKind::Reg) => exec::bin_op::<T, B, Imm, Reg, Reg>,
-        (OpdKind::Stk, OpdKind::Reg) => exec::bin_op::<T, B, Stk, Reg, Reg>,
-        (OpdKind::Reg, OpdKind::Reg) => exec::bin_op::<T, B, Reg, Reg, Reg>,
+        (OpdKind::Imm, OpdKind::Imm) => exec::bin_op::<T, B, ReadImm, ReadImm, WriteReg>,
+        (OpdKind::Stk, OpdKind::Imm) => exec::bin_op::<T, B, ReadStack, ReadImm, WriteReg>,
+        (OpdKind::Reg, OpdKind::Imm) => exec::bin_op::<T, B, ReadReg, ReadImm, WriteReg>,
+        (OpdKind::Imm, OpdKind::Stk) => exec::bin_op::<T, B, ReadImm, ReadStack, WriteReg>,
+        (OpdKind::Stk, OpdKind::Stk) => exec::bin_op::<T, B, ReadStack, ReadStack, WriteReg>,
+        (OpdKind::Reg, OpdKind::Stk) => exec::bin_op::<T, B, ReadReg, ReadStack, WriteReg>,
+        (OpdKind::Imm, OpdKind::Reg) => exec::bin_op::<T, B, ReadImm, ReadReg, WriteReg>,
+        (OpdKind::Stk, OpdKind::Reg) => exec::bin_op::<T, B, ReadStack, ReadReg, WriteReg>,
+        (OpdKind::Reg, OpdKind::Reg) => exec::bin_op::<T, B, ReadReg, ReadReg, WriteReg>,
     }
 }
 
@@ -3419,11 +3419,11 @@ fn select_copy(type_: ValType, kind: OpdKind) -> ThreadedInstr {
 
 fn select_copy_inner<T>(kind: OpdKind) -> ThreadedInstr
 where
-    T: ReadReg + WriteReg
+    T: ReadFromReg + WriteToReg
 {
     match kind {
-        OpdKind::Imm => exec::copy::<T, Imm, Stk>,
-        OpdKind::Stk => exec::copy::<T, Stk, Stk>,
-        OpdKind::Reg => exec::copy::<T, Reg, Stk>,
+        OpdKind::Imm => exec::copy::<T, ReadImm, WriteStack>,
+        OpdKind::Stk => exec::copy::<T, ReadStack, WriteStack>,
+        OpdKind::Reg => exec::copy::<T, ReadReg, WriteStack>,
     }
 }
