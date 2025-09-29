@@ -1513,17 +1513,14 @@ impl<'a> Args<'a> {
     where
         T: ReadFromReg,
     {
-        read_reg(self.ia, self.sa, self.da)
+        T::read_from_reg(self)
     }
 
     fn write_reg<T>(&mut self, val: T)
     where
         T: WriteToReg,
     {
-        let (ia, sa, da) = write_reg(self.ia, self.sa, self.da, val);
-        self.ia = ia;
-        self.sa = sa;
-        self.da = da;
+        val.write_to_reg(self)
     }
 
     unsafe fn store<T>(&mut self, base: u32, offset: u32, val: T) -> Result<(), Trap>
@@ -1547,6 +1544,151 @@ impl<'a> Args<'a> {
         }
     }
 }
+
+pub(crate) trait ReadFromReg {
+    fn read_from_reg(args: &Args) -> Self;
+}
+
+impl ReadFromReg for i32 {
+    fn read_from_reg(args: &Args) -> Self {
+        args.ia as i32
+    }
+}
+
+impl ReadFromReg for u32 {
+    fn read_from_reg(args: &Args) -> Self {
+        args.ia as u32
+    }
+}
+
+impl ReadFromReg for i64 {
+    fn read_from_reg(args: &Args) -> Self {
+        args.ia as i64
+    }
+}
+
+impl ReadFromReg for u64 {
+    fn read_from_reg(args: &Args) -> Self {
+        args.ia as u64
+    }
+}
+
+impl ReadFromReg for f32 {
+    fn read_from_reg(args: &Args) -> Self {
+        args.sa
+    }
+}
+
+impl ReadFromReg for f64 {
+    fn read_from_reg(args: &Args) -> Self {
+        args.da
+    }
+}
+
+impl ReadFromReg for UnguardedFuncRef {
+    fn read_from_reg(args: &Args) -> Self {
+        UnguardedFunc::new(args.ia as *mut _)
+    }
+}
+
+impl ReadFromReg for UnguardedExternRef {
+    fn read_from_reg(args: &Args) -> Self {
+        UnguardedExtern::new(args.ia as *mut _)
+    }
+}
+
+pub(crate) trait WriteToReg {
+    fn write_to_reg(self, args: &mut Args);
+}
+
+impl WriteToReg for i32 {
+    fn write_to_reg(self, args: &mut Args) {
+        args.ia = self as u32 as Ia;
+    }
+}
+
+impl WriteToReg for u32 {
+    fn write_to_reg(self, args: &mut Args) {
+        args.ia = self as Ia;
+    }
+}
+
+impl WriteToReg for i64 {
+    fn write_to_reg(self, args: &mut Args) {
+        args.ia = self as Ia;
+    }
+}
+
+impl WriteToReg for u64 {
+    fn write_to_reg(self, args: &mut Args) {
+        args.ia = self as Ia;
+    }
+}
+
+impl WriteToReg for f32 {
+    fn write_to_reg(self, args: &mut Args) {
+        args.sa = self;
+    }
+}
+
+impl WriteToReg for f64 {
+    fn write_to_reg(self, args: &mut Args) {
+        args.da = self;
+    }
+}
+
+impl WriteToReg for UnguardedFuncRef {
+    fn write_to_reg(self, args: &mut Args) {
+        args.ia = self.map_or(ptr::null_mut(), |ptr| ptr.as_ptr()) as Ia;
+    }
+}
+
+impl WriteToReg for UnguardedExternRef {
+    fn write_to_reg(self, args: &mut Args) {
+        args.ia = self.map_or(ptr::null_mut(), |ptr| ptr.as_ptr()) as Ia;
+    }
+}
+
+pub(crate) trait ReadFromPtr: Copy {
+    unsafe fn read_from_ptr(ptr: *const u8) -> Self;
+}
+
+macro_rules! impl_read_from_ptr {
+    ($($T:ty),*) => {
+        $(
+            impl ReadFromPtr for $T {
+                unsafe fn read_from_ptr(ptr: *const u8) -> Self {
+                    let mut bytes = [0u8; size_of::<$T>()];
+                    ptr::copy_nonoverlapping(ptr, bytes.as_mut_ptr(), bytes.len());
+                    <$T>::from_le_bytes(bytes)
+                }
+            }
+        )*
+    };
+}
+
+impl_read_from_ptr! { i8, u8, i16, u16, i32, u32, i64, u64, f32, f64 }
+
+pub(crate) trait WriteToPtr {
+    fn write_to_ptr(self, ptr: *mut u8);
+}
+
+macro_rules! impl_write_to_ptr {
+    ($($T:ty),*) => {
+        $(
+            impl WriteToPtr for $T {
+                fn write_to_ptr(self, ptr: *mut u8) {
+                    let bytes = self.to_le_bytes();
+                    unsafe {
+                        ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, bytes.len());
+                    }
+                }
+            }
+        )*
+    };
+}
+
+impl_write_to_ptr! { i8, u8, i16, u16, i32, u32, i64, u64, f32, f64 }
 
 pub(crate) trait Read<T>: Sized {
     unsafe fn read(args: &mut Args) -> T;
@@ -1599,168 +1741,5 @@ where
 {
     unsafe fn write(args: &mut Args, val: T) {
         args.write_reg(val)
-    }
-}
-
-pub(crate) trait ReadFromPtr: Copy {
-    unsafe fn read_from_ptr(ptr: *const u8) -> Self;
-}
-
-macro_rules! impl_read_from_ptr {
-    ($($T:ty),*) => {
-        $(
-            impl ReadFromPtr for $T {
-                unsafe fn read_from_ptr(ptr: *const u8) -> Self {
-                    let mut bytes = [0u8; size_of::<$T>()];
-                    ptr::copy_nonoverlapping(ptr, bytes.as_mut_ptr(), bytes.len());
-                    <$T>::from_le_bytes(bytes)
-                }
-            }
-        )*
-    };
-}
-
-impl_read_from_ptr! { i8, u8, i16, u16, i32, u32, i64, u64, f32, f64 }
-
-pub(crate) trait WriteToPtr {
-    fn write_to_ptr(self, ptr: *mut u8);
-}
-
-macro_rules! impl_write_to_ptr {
-    ($($T:ty),*) => {
-        $(
-            impl WriteToPtr for $T {
-                fn write_to_ptr(self, ptr: *mut u8) {
-                    let bytes = self.to_le_bytes();
-                    unsafe {
-                        ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, bytes.len());
-                    }
-                }
-            }
-        )*
-    };
-}
-
-impl_write_to_ptr! { i8, u8, i16, u16, i32, u32, i64, u64, f32, f64 }
-
-/// Reads a value from a register.
-fn read_reg<T>(ia: Ia, sa: Sa, da: Da) -> T
-where
-    T: ReadFromReg,
-{
-    T::read_reg(ia, sa, da)
-}
-
-pub(crate) trait ReadFromReg {
-    fn read_reg(ia: Ia, _sa: Sa, _da: Da) -> Self;
-}
-
-impl ReadFromReg for i32 {
-    fn read_reg(ia: Ia, _sa: Sa, _da: Da) -> Self {
-        ia as i32
-    }
-}
-
-impl ReadFromReg for u32 {
-    fn read_reg(ia: Ia, _sa: Sa, _da: Da) -> Self {
-        ia as u32
-    }
-}
-
-impl ReadFromReg for i64 {
-    fn read_reg(ia: Ia, _sa: Sa, _da: Da) -> Self {
-        ia as i64
-    }
-}
-
-impl ReadFromReg for u64 {
-    fn read_reg(ia: Ia, _sa: Sa, _da: Da) -> Self {
-        ia as u64
-    }
-}
-
-impl ReadFromReg for f32 {
-    fn read_reg(_ia: Ia, sa: Sa, _da: Da) -> Self {
-        sa
-    }
-}
-
-impl ReadFromReg for f64 {
-    fn read_reg(_ia: Ia, _sa: Sa, da: Da) -> Self {
-        da
-    }
-}
-
-impl ReadFromReg for UnguardedFuncRef {
-    fn read_reg(ia: Ia, _sa: Sa, _da: Da) -> Self {
-        UnguardedFunc::new(ia as *mut _)
-    }
-}
-
-impl ReadFromReg for UnguardedExternRef {
-    fn read_reg(ia: Ia, _sa: Sa, _da: Da) -> Self {
-        UnguardedExtern::new(ia as *mut _)
-    }
-}
-
-// Writes a value to a register.
-fn write_reg<T>(ia: Ia, sa: Sa, da: Da, x: T) -> (Ia, Sa, Da)
-where
-    T: WriteToReg,
-{
-    T::write_reg(ia, sa, da, x)
-}
-
-pub(crate) trait WriteToReg {
-    fn write_reg(ia: Ia, sa: Sa, da: Da, x: Self) -> (Ia, Sa, Da);
-}
-
-impl WriteToReg for i32 {
-    fn write_reg(_ia: Ia, sa: Sa, da: Da, x: Self) -> (Ia, Sa, Da) {
-        // Casting to `u32` first allows us to avoid generating a sign extension instruction on some
-        // platforms.
-        (x as u32 as Ia, sa, da)
-    }
-}
-
-impl WriteToReg for u32 {
-    fn write_reg(_ia: Ia, sa: Sa, da: Da, x: Self) -> (Ia, Sa, Da) {
-        (x as Ia, sa, da)
-    }
-}
-
-impl WriteToReg for i64 {
-    fn write_reg(_ia: Ia, sa: Sa, da: Da, x: Self) -> (Ia, Sa, Da) {
-        (x as Ia, sa, da)
-    }
-}
-
-impl WriteToReg for u64 {
-    fn write_reg(_ia: Ia, sa: Sa, da: Da, x: Self) -> (Ia, Sa, Da) {
-        (x as Ia, sa, da)
-    }
-}
-
-impl WriteToReg for f32 {
-    fn write_reg(ia: Ia, _sa: Sa, da: Da, x: Self) -> (Ia, Sa, Da) {
-        (ia, x, da)
-    }
-}
-
-impl WriteToReg for f64 {
-    fn write_reg(ia: Ia, sa: Sa, _da: Da, x: Self) -> (Ia, Sa, Da) {
-        (ia, sa, x)
-    }
-}
-
-impl WriteToReg for UnguardedFuncRef {
-    fn write_reg(_ia: Ia, sa: Sa, da: Da, x: Self) -> (Ia, Sa, Da) {
-        (x.map_or(ptr::null_mut(), |ptr| ptr.as_ptr()) as Ia, sa, da)
-    }
-}
-
-impl WriteToReg for UnguardedExternRef {
-    fn write_reg(_ia: Ia, sa: Sa, da: Da, x: Self) -> (Ia, Sa, Da) {
-        (x.map_or(ptr::null_mut(), |ptr| ptr.as_ptr()) as Ia, sa, da)
     }
 }
