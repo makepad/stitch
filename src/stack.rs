@@ -8,6 +8,8 @@ use {
     },
 };
 
+pub(crate) const ALIGN: usize = 8;
+
 /// A stack for executing threaded code.
 ///
 /// There is exactly one stack per thread. To obtain a mutable reference to the stack for the

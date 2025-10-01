@@ -87,7 +87,7 @@ impl Compiler {
             blocks: &mut self.blocks,
             opds: &mut self.opds,
             fixup_offsets: &mut self.fixup_offsets,
-            first_param_result_stack_idx: -(type_.call_frame_size() as isize),
+            first_param_result_stack_idx: -((exec::call_frame_size(type_) / size_of::<StackSlot>()) as isize),
             first_temp_stack_idx: local_count,
             max_stack_height: local_count,
             regs: Regs::new(),
@@ -1421,7 +1421,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         // Compute the start and end of the call frame, and update the maximum stack height
         // attained by the [`Func`] being compiled.
         let call_frame_stack_start = self.first_temp_stack_idx + self.opds.len();
-        let call_frame_stack_end = call_frame_stack_start + type_.call_frame_size();
+        let call_frame_stack_end = call_frame_stack_start + exec::call_frame_size(&type_) / size_of::<StackSlot>();
         self.max_stack_height = self.max_stack_height.max(call_frame_stack_end);
 
         // Emit the stack offset of the end of the call frame.
@@ -1435,7 +1435,7 @@ impl<'a> InstrVisitor for Compile<'a> {
             );
         }
 
-        // Push the results onto the stack.
+        // Push the outputs onto the stack.
         for result_type in type_.results().iter().copied() {
             self.push_opd(result_type);
         }
@@ -1488,7 +1488,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         // Compute the start and end of the call frame, and update the maximum stack height
         // attained by the [`Func`] being compiled.
         let call_frame_stack_start = self.first_temp_stack_idx + self.opds.len();
-        let call_frame_stack_end = call_frame_stack_start + type_.call_frame_size();
+        let call_frame_stack_end = call_frame_stack_start + exec::call_frame_size(&type_) / size_of::<StackSlot>();
         self.max_stack_height = self.max_stack_height.max(call_frame_stack_end as usize);
 
         // Emit the stack offset of the end of the call frame.
@@ -1501,7 +1501,7 @@ impl<'a> InstrVisitor for Compile<'a> {
                 .map(|mem| mem.0.to_unguarded(self.store.id())),
         );
 
-        // Push the results onto the stack.
+        // Push the outputs onto the stack.
         for result_type in type_.results().iter().copied() {
             self.push_opd(result_type);
         }

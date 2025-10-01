@@ -1,4 +1,5 @@
 use crate::{
+    exec,
     error::Error,
     extern_ref::{ExternRef, UnguardedExternRef},
     func::{FuncType, HostFuncTrampoline},
@@ -75,7 +76,7 @@ macro_rules! impl_into_fund {
                     Self::Params::types(),
                     Self::Results::types(),
                 );
-                let call_frame_size = type_.call_frame_size();
+                let call_frame_size = exec::call_frame_size(&type_) / size_of::<StackSlot>();
                 (
                     type_,
                     HostFuncTrampoline::new(move |store, mut stack| -> Result<StackGuard, Error> {

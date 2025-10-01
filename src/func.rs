@@ -166,12 +166,6 @@ impl FuncType {
             Some(ValType::ExternRef) => types[6].clone(),
         })
     }
-
-    /// Returns the size of a call frame for a function with this [`FuncType`], in number of
-    /// [`StackSlot`]s.
-    pub(crate) fn call_frame_size(&self) -> usize {
-        self.params().len().max(self.results().len()) + 4
-    }
 }
 
 impl Decode for FuncType {

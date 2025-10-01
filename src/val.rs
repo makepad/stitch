@@ -332,6 +332,17 @@ impl ValType {
             _ => None,
         }
     }
+
+    pub(crate) fn size(self) -> usize {
+        match self {
+            Self::I32 => size_of::<i32>(),
+            Self::I64 => size_of::<i64>(),
+            Self::F32 => size_of::<f32>(),
+            Self::F64 => size_of::<f64>(),
+            Self::FuncRef => size_of::<UnguardedFuncRef>(),
+            Self::ExternRef => size_of::<UnguardedExternRef>(),
+        }
+    }
 }
 
 impl Decode for ValType {

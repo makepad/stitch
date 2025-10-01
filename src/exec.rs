@@ -10,18 +10,19 @@ use {
         error::Error,
         extern_::UnguardedExtern,
         extern_ref::UnguardedExternRef,
-        func::{Func, FuncBody, FuncEntity, InstrSlot, UnguardedFunc},
+        func::{Func, FuncBody, FuncEntity, FuncType, InstrSlot, UnguardedFunc},
         func_ref::UnguardedFuncRef,
         global::{GlobalEntity, GlobalEntityT, UnguardedGlobal},
         mem::UnguardedMem,
         ops::*,
+        stack,
         stack::{Stack, StackGuard, StackSlot},
         store::{Handle, Store, UnguardedInternedFuncType},
         table::{TableEntity, TableEntityT, UnguardedTable},
         trap::Trap,
         val::{UnguardedVal, Val},
     },
-    std::{hint, mem, ptr},
+    std::{alloc::Layout, hint, ptr},
 };
 
 /// A `ThreadedInstr` is a subroutine that executes a single WebAssembly instruction.
@@ -168,7 +169,7 @@ pub(crate) fn exec(
 
     // Check that the stack has enough space.
     let stack_height = unsafe { stack.ptr().offset_from(stack.base_ptr()) as usize };
-    if type_.call_frame_size() > Stack::SIZE - stack_height {
+    if call_frame_size(&type_) / size_of::<StackSlot>() > Stack::SIZE - stack_height {
         return Err(Trap::StackOverflow)?;
     }
 
@@ -199,7 +200,7 @@ pub(crate) fn exec(
             let mut trampoline = [
                 call_wasm as InstrSlot,
                 code.code.as_mut_ptr() as InstrSlot,
-                type_.call_frame_size() * mem::size_of::<StackSlot>(),
+                call_frame_size(&type_),
                 stop as InstrSlot,
             ];
 
@@ -263,7 +264,7 @@ pub(crate) fn exec(
         }
         FuncEntity::Host(func) => {
             // Set the stack pointer to the end of the call frame.
-            unsafe { stack.set_ptr(ptr.add(type_.call_frame_size())) };
+            unsafe { stack.set_ptr(ptr.add(call_frame_size(&type_) / size_of::<StackSlot>())) };
 
             // Call the [`HostTrampoline`] of the [`HostFuncEntity`].
             stack = func.trampoline().clone().call(store, stack)?;
@@ -1742,4 +1743,37 @@ where
     unsafe fn write(args: &mut Args, val: T) {
         args.write_reg(val)
     }
+}
+
+#[repr(C)]
+struct SavedRegs {
+    ip: Ip,
+    sp: Sp,
+    md: Md,
+    ms: Ms,
+}
+
+const _: () = assert!(size_of::<SavedRegs>() % stack::ALIGN == 0);
+const _: () = assert!(align_of::<SavedRegs>() >= stack::ALIGN);
+
+/// Returns the size of a call frame for a function of the given type.
+pub(crate) fn call_frame_size(type_: &FuncType) -> usize {
+    let mut params_layout = Layout::from_size_align(0, 1).unwrap();
+    for param in type_.params() {
+        let param_layout = Layout::from_size_align(param.size(), stack::ALIGN).unwrap();
+        let (new_params_layout, _) = params_layout.extend(param_layout).unwrap();
+        params_layout = new_params_layout;
+    }
+    let mut results_layout = Layout::from_size_align(0, 1).unwrap();
+    for result in type_.results() {
+        let result_layout = Layout::from_size_align(result.size(), stack::ALIGN).unwrap();
+        let (new_results_layout, _) = results_layout.extend(result_layout).unwrap();
+        results_layout = new_results_layout;
+    }
+    let layout = Layout::from_size_align(
+        params_layout.size().max(results_layout.size()),
+        params_layout.align().max(results_layout.align())
+    ).unwrap();
+    let (layout, _) = layout.extend(Layout::new::<SavedRegs>()).unwrap();
+    layout.size()
 }
