@@ -485,10 +485,13 @@ pub(crate) unsafe extern "C" fn return_(
         let mut args = Args::from_parts(_ip, sp, _md, _ms, ia, sa, da, cx);
         // Restore call frame from stack.
         let old_sp = args.sp;
-        args.set_ip(*old_sp.offset(-4).cast());
-        args.sp = *old_sp.offset(-3).cast();
-        args.md = *old_sp.offset(-2).cast();
-        args.ms = *old_sp.offset(-1).cast();
+        let saved_regs: SavedRegs = ptr::read(
+            old_sp.cast::<u8>().offset( -(size_of::<SavedRegs>() as isize)).cast(),
+        );
+        args.set_ip(saved_regs.ip);
+        args.sp = saved_regs.sp;
+        args.md = saved_regs.md;
+        args.ms = saved_regs.ms;
         args.next()
     }
 }
@@ -510,10 +513,15 @@ pub(crate) unsafe extern "C" fn call_wasm(
         // Store call frame on stack.
         let new_sp: Sp = sp.cast::<u8>().offset(offset as isize).cast();
         args.align_ip(code::ALIGN);
-        *new_sp.offset(-4).cast() = args.ip();
-        *new_sp.offset(-3).cast() = args.sp;
-        *new_sp.offset(-2).cast() = args.md;
-        *new_sp.offset(-1).cast() = args.ms;
+        ptr::write(
+        new_sp.cast::<u8>().offset( -(size_of::<SavedRegs>() as isize)).cast(),
+            SavedRegs {
+                ip: args.ip(),
+                sp: args.sp,
+                md: args.md,
+                ms: args.ms,
+            }
+        );
         args.set_ip(target);
         args.sp = new_sp;
         args.next()
@@ -611,10 +619,15 @@ pub(crate) unsafe extern "C" fn call_indirect(
                 // Store call frame on stack.
                 let new_sp: Sp = args.sp.cast::<u8>().offset(stack_offset as isize).cast();
                 args.align_ip(code::ALIGN);
-                *new_sp.offset(-4).cast() = args.ip();
-                *new_sp.offset(-3).cast() = args.sp;
-                *new_sp.offset(-2).cast() = args.md;
-                *new_sp.offset(-1).cast() = args.ms;
+                ptr::write(
+                    new_sp.cast::<u8>().offset( -(size_of::<SavedRegs>() as isize)).cast(),
+                    SavedRegs {
+                        ip: args.ip(),
+                        sp: args.sp,
+                        md: args.md,
+                        ms: args.ms,
+                    }
+                );
 
                 // Update stack pointer and branch to target.
                 args.set_ip(target);
@@ -1745,12 +1758,13 @@ where
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 #[repr(C)]
-struct SavedRegs {
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
+pub(crate) struct SavedRegs {
+    pub(crate) ip: Ip,
+    pub(crate) sp: Sp,
+    pub(crate) md: Md,
+    pub(crate) ms: Ms,
 }
 
 const _: () = assert!(size_of::<SavedRegs>() % stack::ALIGN == 0);

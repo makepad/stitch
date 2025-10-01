@@ -2,6 +2,7 @@ use {
     crate::{
         data::{Data, DataEntity},
         decode::{Decode, DecodeError, Decoder},
+        exec::SavedRegs,
         limits::Limits,
         stack::Stack,
         store::{Handle, HandlePair, Store, StoreId, UnguardedHandle},
@@ -215,10 +216,11 @@ impl MemEntity {
         // a pointer to the new data and size of this [`Memory`] instead.
         let mut ptr = stack.ptr();
         while ptr != stack.base_ptr() {
-            ptr = *ptr.offset(-3).cast();
-            if *ptr.offset(-2).cast::<*mut u8>() == old_data {
-                *ptr.offset(-2).cast() = new_data;
-                *ptr.offset(-1).cast() = new_size;
+            let saved_regs: &mut SavedRegs = &mut *ptr.cast::<u8>().offset(-(size_of::<SavedRegs>() as isize)).cast();
+            ptr = saved_regs.sp;
+            if saved_regs.md == old_data {
+                saved_regs.md = new_data;
+                saved_regs.ms = new_size;
             }
         }
 
