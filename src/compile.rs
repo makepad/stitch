@@ -61,37 +61,42 @@ impl Compiler {
         self.fixup_offsets.clear();
 
         let type_ = func.type_(store);
-        let locals = &mut self.locals;
-        for type_ in type_
-            .params()
-            .iter()
-            .copied()
-            .chain(code.locals.iter().copied())
-        {
-            locals.push(Local {
-                type_,
-                first_opd_idx: None,
-            });
-        }
-        let local_count = locals.len() - type_.params().len();
-
         let mut compile = Compile {
             store,
-            type_: type_.clone(),
+            type_: func.type_(store).clone(),
             instance,
             instr_stream: InstrStream::new_with_allocs(&code.expr, mem::take(&mut self.instr_stream_allocs)),
             br_table_label_idxs: &mut self.br_table_label_idxs,
             typed_select_val_types: &mut self.typed_select_val_types,
-            locals,
+            locals: &mut self.locals,
             blocks: &mut self.blocks,
             opds: &mut self.opds,
             fixup_offsets: &mut self.fixup_offsets,
-            first_param_result_stack_offset: -(exec::call_frame_size(type_) as isize),
-            first_temp_stack_offset: local_count * 8,
-            max_stack_height: local_count,
+            first_temp_stack_offset: 0,
+            max_stack_height: 0,
             regs: Regs::new(),
             code: CodeBuilder::new(),
         };
+        let mut stack_offset = -(exec::call_frame_size(&compile.type_) as isize);
+        for type_ in compile.type_.params().iter().copied() {
+            compile.locals.push(Local {
+                type_,
+                stack_offset,
+                first_opd_idx: None,
+            });
+            stack_offset += type_.padded_size_of() as isize;
+        }
+        let mut stack_offset = 0usize;
+        for type_ in code.locals.iter().copied() {
+            compile.locals.push(Local {
+                type_,
+                stack_offset: stack_offset as isize,
+                first_opd_idx: None,
+            });
+            stack_offset += type_.padded_size_of();
+        }
+        compile.first_temp_stack_offset = stack_offset as usize;
+        compile.max_stack_height = stack_offset;
         compile.push_block(
             BlockKind::Block,
             FuncType::new([], type_.results().iter().copied()),
@@ -110,10 +115,14 @@ impl Compiler {
             let instr = compile.instr_stream.next().unwrap();
             instr.visit(&mut compile).unwrap();
         }
-        for (result_idx, result_type) in type_.clone().results().iter().copied().enumerate().rev() {
+        let mut src_stack_offset = compile.first_temp_stack_offset as isize;
+        let mut dst_stack_offset = -(exec::call_frame_size(&compile.type_) as isize);
+        for result_type in compile.type_.clone().results().iter().copied() {
             compile.emit_instr(select_copy(result_type, OpdKind::Stk));
-            compile.emit_stack_offset(compile.temp_stack_offset(result_idx));
-            compile.emit_stack_offset(compile.param_result_stack_offset(result_idx));
+            compile.emit_stack_offset(src_stack_offset);
+            compile.emit_stack_offset(dst_stack_offset);
+            src_stack_offset += result_type.padded_size_of() as isize;
+            dst_stack_offset += result_type.padded_size_of() as isize;
         }
         compile.emit_instr(exec::return_ as ThreadedInstr);
 
@@ -131,7 +140,7 @@ impl Compiler {
 
         CompiledFuncBody {
             max_stack_height: compile.max_stack_height,
-            local_count,
+            local_count: compile.locals.len() - compile.type_.params().len(),
             code,
         }
     }
@@ -151,11 +160,10 @@ struct Compile<'a> {
     instr_stream: InstrStream<'a>,
     br_table_label_idxs: &'a mut Vec<u32>,
     typed_select_val_types: &'a mut Vec<ValType>,
-    locals: &'a mut [Local],
+    locals: &'a mut Vec<Local>,
     blocks: &'a mut Vec<Block>,
     opds: &'a mut Vec<Opd>,
     fixup_offsets: &'a mut Vec<usize>,
-    first_param_result_stack_offset: isize,
     first_temp_stack_offset: usize,
     max_stack_height: usize,
     regs: Regs,
@@ -704,7 +712,7 @@ impl<'a> Compile<'a> {
     fn preserve_local_opd(&mut self, opd_idx: usize) {
         let local_idx = self.opds[opd_idx].local_idx.unwrap();
         self.emit_instr(select_copy(self.locals[local_idx].type_, OpdKind::Stk));
-        self.emit_stack_offset(self.local_stack_offset(local_idx));
+        self.emit_stack_offset(self.locals[local_idx].stack_offset);
         self.emit_stack_offset(self.temp_stack_offset(opd_idx));
         self.remove_local_opd(opd_idx);
     }
@@ -743,20 +751,6 @@ impl<'a> Compile<'a> {
 
     // Methods for operating on the stack.
 
-    /// Returns the stack index of the parameter/result with the given index.
-    fn param_result_stack_offset(&self, param_result_idx: usize) -> isize {
-        self.first_param_result_stack_offset + param_result_idx as isize * 8
-    }
-
-    /// Returns the stack index of the local with the given index.
-    fn local_stack_offset(&self, local_idx: usize) -> isize {
-        if local_idx < self.type_.params().len() {
-            self.param_result_stack_offset(local_idx)
-        } else {
-            (local_idx - self.type_.params().len()) as isize * 8
-        }
-    }
-
     /// Returns the stack index of the temporary with the given index.
     fn temp_stack_offset(&self, temp_idx: usize) -> isize {
         (self.first_temp_stack_offset + temp_idx * 8) as isize
@@ -766,7 +760,7 @@ impl<'a> Compile<'a> {
     fn opd_stack_offset(&self, opd_depth: usize) -> isize {
         let opd_idx = self.opds.len() - 1 - opd_depth;
         if let Some(local_idx) = self.opds[opd_idx].local_idx {
-            self.local_stack_offset(local_idx)
+            self.locals[local_idx].stack_offset
         } else {
             self.temp_stack_offset(opd_idx)
         }
@@ -1354,6 +1348,7 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Copy the return values to their expected locations on the stack, and pop them from the
         // stack.
+        let mut result_stack_offset = -(exec::call_frame_size(&self.type_) as isize);
         for (result_idx, result_type) in self
             .type_
             .clone()
@@ -1361,16 +1356,20 @@ impl<'a> InstrVisitor for Compile<'a> {
             .iter()
             .copied()
             .enumerate()
-            .rev()
         {
-            self.ensure_opd_not_imm(0);
-            self.emit_instr(if self.opd(0).is_reg {
+            let opd_depth =  self.type_.results().len() - 1 - result_idx;
+            self.ensure_opd_not_imm(opd_depth);
+            self.emit_instr(if self.opd(opd_depth).is_reg {
                 select_copy(result_type, OpdKind::Reg)
             } else {
                 select_copy(result_type, OpdKind::Stk)
             });
-            self.emit_and_pop_opd();
-            self.emit_stack_offset(self.param_result_stack_offset(result_idx));
+            self.emit_opd(opd_depth);
+            self.emit_stack_offset(result_stack_offset);
+            result_stack_offset += result_type.padded_size_of() as isize;
+        }
+        for _ in 0..self.type_.results().len() {
+            self.pop_opd();
         }
 
         // Emit the instruction.
@@ -1675,8 +1674,8 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit_opd(0);
 
         // Emit the stack offset of the local.
-        self.emit_stack_offset(self.local_stack_offset(local_idx));
-
+        self.emit_stack_offset(self.locals[local_idx].stack_offset);
+     
         Ok(())
     }
 
@@ -2898,6 +2897,8 @@ impl<'a> InstrVisitor for Compile<'a> {
 struct Local {
     // The type of this local.
     type_: ValType,
+    // The offset of this local on the stack.
+    stack_offset: isize,
     // The index of the first operand in the list of operands for this local.
     first_opd_idx: Option<usize>,
 }
