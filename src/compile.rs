@@ -641,6 +641,7 @@ impl<'a> Compile<'a> {
             type_,
             is_unreachable: false,
             height: self.opds.len(),
+            stack_offset: self.temp_stack_offset(self.opds.len()) as usize,
             first_instr_offset: self.code.len(),
             first_hole_offset: None,
             else_hole_offset: None,
@@ -814,20 +815,22 @@ impl<'a> Compile<'a> {
     /// Copies the values for the label with the given index to their expected locations
     /// on the stack, and pop them from the stack.
     fn resolve_label_vals(&mut self, label_idx: usize) {
+        let mut label_val_stack_offset = self.block(label_idx).stack_offset;
         for (label_val_idx, label_type) in self
             .block(label_idx)
             .label_types()
             .iter()
             .copied()
             .enumerate()
-            .rev()
         {
+            let opd_depth = self.block(label_idx).label_types().len() - 1 - label_val_idx;
             self.emit_instr(select_copy(label_type, OpdKind::Stk));
-            self.emit_stack_offset(self.opd_stack_offset(0));
+            self.emit_stack_offset(self.opd_stack_offset(opd_depth));
+            self.emit_stack_offset(label_val_stack_offset as isize);
+            label_val_stack_offset += label_type.padded_size_of();
+        }
+        for _ in 0..self.block(label_idx).label_types().len() {
             self.pop_opd();
-            self.emit_stack_offset(
-                self.temp_stack_offset(self.block(label_idx).height + label_val_idx),
-            );
         }
     }
 
@@ -2914,6 +2917,8 @@ struct Block {
     is_unreachable: bool,
     // The height of the operand stack at the start of this block.
     height: usize,
+    // The offset of the stack at the start of this block.
+    stack_offset: usize,
     // The index of the first instruction for this block.
     first_instr_offset: usize,
     // The index of the hole for the start of the `else` block. This is only used for `if` blocks.
