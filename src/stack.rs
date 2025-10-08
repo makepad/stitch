@@ -1,6 +1,7 @@
 use {
     crate::aliasable_box::AliasableBox,
     std::{
+        alloc::Layout,
         cell::Cell,
         mem::ManuallyDrop,
         ops::{Deref, DerefMut},
@@ -98,4 +99,9 @@ pub(crate) type StackSlot = u64;
 
 thread_local! {
     static STACK: Cell<Option<Stack>> = Cell::new(Some(Stack::new()));
+}
+
+pub(crate) fn padded_size_of<T>() -> usize {
+    let layout = Layout::from_size_align(size_of::<T>(), ALIGN).unwrap();
+    layout.pad_to_align().size()
 }
