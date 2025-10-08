@@ -17,7 +17,6 @@ use {
         instance::Instance,
         ops::*,
         ref_::RefType,
-        stack::StackSlot,
         store::Store,
         table::{TableEntity, TableEntityT},
         val::{UnguardedVal, ValType, ValTypeOf},
@@ -87,8 +86,8 @@ impl Compiler {
             blocks: &mut self.blocks,
             opds: &mut self.opds,
             fixup_offsets: &mut self.fixup_offsets,
-            first_param_result_stack_idx: -((exec::call_frame_size(type_) / size_of::<StackSlot>()) as isize),
-            first_temp_stack_idx: local_count,
+            first_param_result_stack_offset: -(exec::call_frame_size(type_) as isize),
+            first_temp_stack_offset: local_count * 8,
             max_stack_height: local_count,
             regs: Regs::new(),
             code: CodeBuilder::new(),
@@ -113,8 +112,8 @@ impl Compiler {
         }
         for (result_idx, result_type) in type_.clone().results().iter().copied().enumerate().rev() {
             compile.emit_instr(select_copy(result_type, OpdKind::Stk));
-            compile.emit_stack_offset(compile.temp_stack_idx(result_idx));
-            compile.emit_stack_offset(compile.param_result_stack_idx(result_idx));
+            compile.emit_stack_offset(compile.temp_stack_offset(result_idx));
+            compile.emit_stack_offset(compile.param_result_stack_offset(result_idx));
         }
         compile.emit_instr(exec::return_ as ThreadedInstr);
 
@@ -156,8 +155,8 @@ struct Compile<'a> {
     blocks: &'a mut Vec<Block>,
     opds: &'a mut Vec<Opd>,
     fixup_offsets: &'a mut Vec<usize>,
-    first_param_result_stack_idx: isize,
-    first_temp_stack_idx: usize,
+    first_param_result_stack_offset: isize,
+    first_temp_stack_offset: usize,
     max_stack_height: usize,
     regs: Regs,
     code: CodeBuilder
@@ -697,7 +696,7 @@ impl<'a> Compile<'a> {
         let opd_idx = self.opds.len() - 1 - opd_depth;
         self.emit_instr(select_copy(self.opds[opd_idx].type_, OpdKind::Imm));
         self.emit_val(self.opds[opd_idx].val.unwrap());
-        self.emit_stack_offset(self.temp_stack_idx(opd_idx));
+        self.emit_stack_offset(self.temp_stack_offset(opd_idx));
         self.opd_mut(opd_depth).val = None;
     }
 
@@ -705,8 +704,8 @@ impl<'a> Compile<'a> {
     fn preserve_local_opd(&mut self, opd_idx: usize) {
         let local_idx = self.opds[opd_idx].local_idx.unwrap();
         self.emit_instr(select_copy(self.locals[local_idx].type_, OpdKind::Stk));
-        self.emit_stack_offset(self.local_stack_idx(local_idx));
-        self.emit_stack_offset(self.temp_stack_idx(opd_idx));
+        self.emit_stack_offset(self.local_stack_offset(local_idx));
+        self.emit_stack_offset(self.temp_stack_offset(opd_idx));
         self.remove_local_opd(opd_idx);
     }
 
@@ -720,7 +719,7 @@ impl<'a> Compile<'a> {
             next_opd_idx: None,
             is_reg: false,
         });
-        let stack_height = self.first_temp_stack_idx as usize + (self.opds.len() - 1);
+        let stack_height = self.first_temp_stack_offset as usize + (self.opds.len() - 1) * 8;
         self.max_stack_height = self.max_stack_height.max(stack_height);
     }
 
@@ -745,31 +744,31 @@ impl<'a> Compile<'a> {
     // Methods for operating on the stack.
 
     /// Returns the stack index of the parameter/result with the given index.
-    fn param_result_stack_idx(&self, param_result_idx: usize) -> isize {
-        self.first_param_result_stack_idx + param_result_idx as isize
+    fn param_result_stack_offset(&self, param_result_idx: usize) -> isize {
+        self.first_param_result_stack_offset + param_result_idx as isize * 8
     }
 
     /// Returns the stack index of the local with the given index.
-    fn local_stack_idx(&self, local_idx: usize) -> isize {
+    fn local_stack_offset(&self, local_idx: usize) -> isize {
         if local_idx < self.type_.params().len() {
-            self.param_result_stack_idx(local_idx)
+            self.param_result_stack_offset(local_idx)
         } else {
-            (local_idx - self.type_.params().len()) as isize
+            (local_idx - self.type_.params().len()) as isize * 8
         }
     }
 
     /// Returns the stack index of the temporary with the given index.
-    fn temp_stack_idx(&self, temp_idx: usize) -> isize {
-        (self.first_temp_stack_idx + temp_idx) as isize
+    fn temp_stack_offset(&self, temp_idx: usize) -> isize {
+        (self.first_temp_stack_offset + temp_idx * 8) as isize
     }
 
     /// Returns the stack index of the operand at the given depth.
-    fn opd_stack_idx(&self, opd_depth: usize) -> isize {
+    fn opd_stack_offset(&self, opd_depth: usize) -> isize {
         let opd_idx = self.opds.len() - 1 - opd_depth;
         if let Some(local_idx) = self.opds[opd_idx].local_idx {
-            self.local_stack_idx(local_idx)
+            self.local_stack_offset(local_idx)
         } else {
-            self.temp_stack_idx(opd_idx)
+            self.temp_stack_offset(opd_idx)
         }
     }
 
@@ -805,7 +804,7 @@ impl<'a> Compile<'a> {
         let opd_idx = self.regs[reg_name].opd_idx().unwrap();
         let opd_type = self.opds[opd_idx].type_;
         self.emit_instr(select_copy(opd_type, OpdKind::Reg));
-        self.emit_stack_offset(self.temp_stack_idx(opd_idx));
+        self.emit_stack_offset(self.temp_stack_offset(opd_idx));
         self.dealloc_reg(reg_name);
     }
 
@@ -830,10 +829,10 @@ impl<'a> Compile<'a> {
             .rev()
         {
             self.emit_instr(select_copy(label_type, OpdKind::Stk));
-            self.emit_stack_offset(self.opd_stack_idx(0));
+            self.emit_stack_offset(self.opd_stack_offset(0));
             self.pop_opd();
             self.emit_stack_offset(
-                self.temp_stack_idx(self.block(label_idx).height + label_val_idx),
+                self.temp_stack_offset(self.block(label_idx).height + label_val_idx),
             );
         }
     }
@@ -864,7 +863,7 @@ impl<'a> Compile<'a> {
     // emits the value of the operand. For register operands, we don't need to anything.
     fn emit_opd(&mut self, opd_depth: usize) {
         match self.opd(opd_depth).kind() {
-            OpdKind::Stk => self.emit_stack_offset(self.opd_stack_idx(opd_depth)),
+            OpdKind::Stk => self.emit_stack_offset(self.opd_stack_offset(opd_depth)),
             OpdKind::Imm => {
                 self.emit_val(self.opd(opd_depth).val.unwrap());
             }
@@ -885,8 +884,8 @@ impl<'a> Compile<'a> {
     }
 
     /// Emits the offset of the stack slot with the given index.
-    fn emit_stack_offset(&mut self, stack_idx: isize) {
-        self.emit(stack_idx as i32 * mem::size_of::<StackSlot>() as i32);
+    fn emit_stack_offset(&mut self, stack_offset: isize) {
+        self.emit(stack_offset as i32);
     }
 
     /// Emits the label for the block with the given index.
@@ -1371,7 +1370,7 @@ impl<'a> InstrVisitor for Compile<'a> {
                 select_copy(result_type, OpdKind::Stk)
             });
             self.emit_and_pop_opd();
-            self.emit_stack_offset(self.param_result_stack_idx(result_idx));
+            self.emit_stack_offset(self.param_result_stack_offset(result_idx));
         }
 
         // Emit the instruction.
@@ -1420,8 +1419,8 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Compute the start and end of the call frame, and update the maximum stack height
         // attained by the [`Func`] being compiled.
-        let call_frame_stack_start = self.first_temp_stack_idx + self.opds.len();
-        let call_frame_stack_end = call_frame_stack_start + exec::call_frame_size(&type_) / size_of::<StackSlot>();
+        let call_frame_stack_start = self.first_temp_stack_offset + self.opds.len() * 8;
+        let call_frame_stack_end = call_frame_stack_start + exec::call_frame_size(&type_);
         self.max_stack_height = self.max_stack_height.max(call_frame_stack_end);
 
         // Emit the stack offset of the end of the call frame.
@@ -1487,8 +1486,8 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Compute the start and end of the call frame, and update the maximum stack height
         // attained by the [`Func`] being compiled.
-        let call_frame_stack_start = self.first_temp_stack_idx + self.opds.len();
-        let call_frame_stack_end = call_frame_stack_start + exec::call_frame_size(&type_) / size_of::<StackSlot>();
+        let call_frame_stack_start = self.first_temp_stack_offset + self.opds.len() * 8;
+        let call_frame_stack_end = call_frame_stack_start + exec::call_frame_size(&type_);
         self.max_stack_height = self.max_stack_height.max(call_frame_stack_end as usize);
 
         // Emit the stack offset of the end of the call frame.
@@ -1528,7 +1527,7 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the output onto the stack and emit its stack offset.
         self.push_opd(ValType::FuncRef);
-        self.emit_stack_offset(self.opd_stack_idx(0));
+        self.emit_stack_offset(self.opd_stack_offset(0));
 
         Ok(())
     }
@@ -1574,7 +1573,7 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the output onto the stack and emit its stack offset.
         self.push_opd(ValType::FuncRef);
-        self.emit_stack_offset(self.opd_stack_idx(0));
+        self.emit_stack_offset(self.opd_stack_offset(0));
 
         Ok(())
     }
@@ -1676,7 +1675,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit_opd(0);
 
         // Emit the stack offset of the local.
-        self.emit_stack_offset(self.local_stack_idx(local_idx));
+        self.emit_stack_offset(self.local_stack_offset(local_idx));
 
         Ok(())
     }
@@ -1702,7 +1701,7 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the output onto the stack and emit its stack offset.
         self.push_opd(val_type);
-        self.emit_stack_offset(self.opd_stack_idx(0));
+        self.emit_stack_offset(self.opd_stack_offset(0));
 
         Ok(())
     }
@@ -1760,7 +1759,7 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the output onto the stack and emit its stack offset.
         self.push_opd(ValType::I32);
-        self.emit_stack_offset(self.opd_stack_idx(0));
+        self.emit_stack_offset(self.opd_stack_offset(0));
 
         Ok(())
     }
@@ -1817,7 +1816,7 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the output onto the stack and emit its stack offset.
         self.push_opd(ValType::I32);
-        self.emit_stack_offset(self.opd_stack_idx(0));
+        self.emit_stack_offset(self.opd_stack_offset(0));
 
         Ok(())
     }
@@ -1857,7 +1856,7 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the output onto the stack and emit its stack offset.
         self.push_opd(ValType::I32);
-        self.emit_stack_offset(self.opd_stack_idx(0));
+        self.emit_stack_offset(self.opd_stack_offset(0));
 
         Ok(())
     }
@@ -2119,7 +2118,7 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the output onto the stack and emit its stack offset.
         self.push_opd(ValType::I32);
-        self.emit_stack_offset(self.opd_stack_idx(0));
+        self.emit_stack_offset(self.opd_stack_offset(0));
 
         Ok(())
     }
@@ -2153,7 +2152,7 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the output onto the stack and emit its stack offset.
         self.push_opd(ValType::I32);
-        self.emit_stack_offset(self.opd_stack_idx(0));
+        self.emit_stack_offset(self.opd_stack_offset(0));
 
         Ok(())
     }

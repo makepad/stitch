@@ -1391,7 +1391,7 @@ pub(crate) unsafe extern "C" fn enter(
 
         // Check that the stack has enough space.
         let stack_height = (args.sp).offset_from((*args.cx).stack.as_mut().unwrap_unchecked().base_ptr()) as usize;
-        if code.max_stack_height * 8 > Stack::SIZE - stack_height {
+        if code.max_stack_height > Stack::SIZE - stack_height {
             return ControlFlow::Trap(Trap::StackOverflow).to_bits();
         }
 
