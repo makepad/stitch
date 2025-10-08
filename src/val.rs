@@ -4,7 +4,7 @@ use {
         extern_ref::{ExternRef, UnguardedExternRef},
         func_ref::{FuncRef, UnguardedFuncRef},
         ref_::{Ref, RefType, UnguardedRef},
-        stack::StackSlot,
+        stack::padded_size_of,
         store::StoreId,
     },
     std::fmt,
@@ -228,8 +228,8 @@ pub(crate) enum UnguardedVal {
 }
 
 impl UnguardedVal {
-    /// Reads an [`UnguardedVal`] of the given [`ValType`] from the given stack slot.
-    pub(crate) unsafe fn read_from_stack(ptr: *const StackSlot, type_: ValType) -> Self {
+    /// Reads an [`UnguardedVal`] of the given [`ValType`] from the given pointer.
+    pub(crate) unsafe fn read_from_ptr(ptr: *const u8, type_: ValType) -> Self {
         let val = match type_ {
             ValType::I32 => (*ptr.cast::<i32>()).into(),
             ValType::I64 => (*ptr.cast::<i64>()).into(),
@@ -241,8 +241,8 @@ impl UnguardedVal {
         val
     }
 
-    /// Writes this [`UnguardedVal`] to the given stack slot.
-    pub(crate) unsafe fn write_to_stack(self, ptr: *mut StackSlot) {
+    /// Writes this [`UnguardedVal`] to the given pointer.
+    pub(crate) unsafe fn write_to_ptr(self, ptr: *mut u8) {
         match self {
             UnguardedVal::I32(val) => *ptr.cast() = val,
             UnguardedVal::I64(val) => *ptr.cast() = val,
@@ -341,6 +341,17 @@ impl ValType {
             Self::F64 => size_of::<f64>(),
             Self::FuncRef => size_of::<UnguardedFuncRef>(),
             Self::ExternRef => size_of::<UnguardedExternRef>(),
+        }
+    }
+
+    pub(crate) fn padded_size_of(self) -> usize {
+        match self {
+            Self::I32 => padded_size_of::<i32>(),
+            Self::I64 => padded_size_of::<i64>(),
+            Self::F32 => padded_size_of::<f32>(),
+            Self::F64 => padded_size_of::<f64>(),
+            Self::FuncRef => padded_size_of::<UnguardedFuncRef>(),
+            Self::ExternRef => padded_size_of::<UnguardedExternRef>(),
         }
     }
 }

@@ -176,10 +176,9 @@ pub(crate) fn exec(
     // Copy the arguments to the stack.
     let mut ptr = stack.ptr();
     for arg in args.iter().copied() {
-        let arg = arg.to_unguarded(store.id());
         unsafe {
-            arg.write_to_stack(ptr);
-            ptr = ptr.add(1);
+            arg.to_unguarded(store.id()).write_to_ptr(ptr);
+            ptr = ptr.add(arg.type_().padded_size_of());
         };
     }
 
@@ -264,7 +263,7 @@ pub(crate) fn exec(
         }
         FuncEntity::Host(func) => {
             // Set the stack pointer to the end of the call frame.
-            unsafe { stack.set_ptr(ptr.add(call_frame_size(&type_) / size_of::<StackSlot>())) };
+            unsafe { stack.set_ptr(ptr.add(call_frame_size(&type_))) };
 
             // Call the [`HostTrampoline`] of the [`HostFuncEntity`].
             stack = func.trampoline().clone().call(store, stack)?;
@@ -279,10 +278,10 @@ pub(crate) fn exec(
     for result in results.iter_mut() {
         unsafe {
             *result = Val::from_unguarded(
-                UnguardedVal::read_from_stack(ptr, result.type_()),
+                UnguardedVal::read_from_ptr(ptr, result.type_()),
                 store.id(),
             );
-            ptr = ptr.add(1);
+            ptr = ptr.add(result.type_().padded_size_of());
         }
     }
 
@@ -1138,7 +1137,7 @@ where
         let mut mem: UnguardedMem = args.read_imm();
 
         // Perform operation
-        (*args.cx).stack.as_mut().unwrap_unchecked().set_ptr(args.sp as *mut StackSlot);
+        (*args.cx).stack.as_mut().unwrap_unchecked().set_ptr(args.sp);
         let old_size = mem
             .as_mut()
             .grow_with_stack(count, (*cx).stack.as_mut().unwrap_unchecked())
@@ -1391,8 +1390,8 @@ pub(crate) unsafe extern "C" fn enter(
         };
 
         // Check that the stack has enough space.
-        let stack_height = (args.sp as *mut StackSlot).offset_from((*args.cx).stack.as_mut().unwrap_unchecked().base_ptr()) as usize;
-        if code.max_stack_height > Stack::SIZE - stack_height {
+        let stack_height = (args.sp).offset_from((*args.cx).stack.as_mut().unwrap_unchecked().base_ptr()) as usize;
+        if code.max_stack_height * 8 > Stack::SIZE - stack_height {
             return ControlFlow::Trap(Trap::StackOverflow).to_bits();
         }
 

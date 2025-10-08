@@ -22,13 +22,13 @@ pub(crate) const ALIGN: usize = 8;
 /// takes up multiple stack slots.
 #[derive(Debug)]
 pub struct Stack {
-    slots: AliasableBox<[StackSlot]>,
-    ptr: *mut StackSlot,
+    slots: AliasableBox<[u64]>,
+    ptr: *mut u8,
 }
 
 impl Stack {
     /// The size of the stack in bytes.
-    pub(crate) const SIZE: usize = 1024 * 1024;
+    pub(crate) const SIZE: usize = 8 * 1024 * 1024;
 
     /// Locks the [`Stack`] for the current thread, returning a [`StackGuard`].
     pub fn lock() -> StackGuard {
@@ -38,13 +38,13 @@ impl Stack {
     }
 
     /// Returns a pointer to the base of the stack.
-    pub(crate) fn base_ptr(&mut self) -> *mut StackSlot {
+    pub(crate) fn base_ptr(&mut self) -> *mut u8 {
         self.slots.as_mut_ptr() as *mut _
     }
 
     /// Returns a pointer to the top of the stack.
-    pub fn ptr(&mut self) -> *mut StackSlot {
-        self.ptr
+    pub fn ptr(&mut self) -> *mut u8 {
+        self.ptr as *mut _
     }
 
     /// Sets the pointer to the top of the stack.
@@ -52,17 +52,17 @@ impl Stack {
     /// # Safety
     ///
     /// The pointer must be within bounds.
-    pub(crate) unsafe fn set_ptr(&mut self, ptr: *mut StackSlot) {
-        self.ptr = ptr;
+    pub(crate) unsafe fn set_ptr(&mut self, ptr: *mut u8) {
+        self.ptr = ptr as *mut _;
     }
 
     /// Creates a new, zero-initialized [`Stack`].
     fn new() -> Self {
         let mut stack = Self {
-            slots: AliasableBox::from_box(Box::from(vec![0; Self::SIZE])),
+            slots: AliasableBox::from_box(Box::from(vec![0; Self::SIZE / 8])),
             ptr: ptr::null_mut(),
         };
-        stack.ptr = stack.slots.as_mut_ptr();
+        stack.ptr = stack.slots.as_mut_ptr() as *mut u8;
         stack
     }
 }
