@@ -74,7 +74,7 @@ pub(crate) type ThreadedInstr = unsafe extern "sysv64" fn(
 pub(crate) type Ip = *mut u8;
 
 /// The stack pointer register (`Sp`) stores a pointer to the end of the current call frame.
-pub(crate) type Sp = *mut StackSlot;
+pub(crate) type Sp = *mut u8;
 
 /// The memory data register (`Md`) stores a pointer to the start of the current [`Memory`].
 pub(crate) type Md = *mut u8;
@@ -207,7 +207,7 @@ pub(crate) fn exec(
             // Create an execution context.
             let mut context = Context {
                 ip: trampoline.as_mut_ptr() as *mut u8,
-                sp: stack.ptr(),
+                sp: stack.ptr() as Sp,
                 md: ptr::null_mut(),
                 ms: 0,
                 ia: 0,
@@ -484,12 +484,12 @@ pub(crate) unsafe extern "C" fn return_(
     unsafe {
         let mut args = Args::from_parts(_ip, sp, _md, _ms, ia, sa, da, cx);
         // Restore call frame from stack.
-        let old_sp = args.sp;
+        let old_sp = args.sp ;
         let saved_regs: SavedRegs = ptr::read(
-            old_sp.cast::<u8>().offset( -(size_of::<SavedRegs>() as isize)).cast(),
+            old_sp.offset( -(size_of::<SavedRegs>() as isize)).cast(),
         );
         args.set_ip(saved_regs.ip);
-        args.sp = saved_regs.sp;
+        args.sp = saved_regs.sp as Sp;
         args.md = saved_regs.md;
         args.ms = saved_regs.ms;
         args.next()
@@ -511,10 +511,10 @@ pub(crate) unsafe extern "C" fn call_wasm(
         let target = args.read_imm();
         let offset: i32 = args.read_imm();
         // Store call frame on stack.
-        let new_sp: Sp = sp.cast::<u8>().offset(offset as isize).cast();
+        let new_sp = args.sp.offset(offset as isize);
         args.align_ip(code::ALIGN);
         ptr::write(
-        new_sp.cast::<u8>().offset( -(size_of::<SavedRegs>() as isize)).cast(),
+        new_sp.offset( -(size_of::<SavedRegs>() as isize)).cast(),
             SavedRegs {
                 ip: args.ip(),
                 sp: args.sp,
@@ -523,7 +523,7 @@ pub(crate) unsafe extern "C" fn call_wasm(
             }
         );
         args.set_ip(target);
-        args.sp = new_sp;
+        args.sp = new_sp as Sp;
         args.next()
     }
 }
@@ -545,7 +545,7 @@ pub(crate) unsafe extern "C" fn call_host(
         let mem: Option<UnguardedMem> = args.read_imm();
 
         let mut stack = (*args.cx).stack.take().unwrap_unchecked();
-        stack.set_ptr(args.sp.cast::<u8>().offset(offset as isize).cast());
+        stack.set_ptr(args.sp.offset(offset as isize).cast());
         let FuncEntity::Host(func) = func.as_ref() else {
             hint::unreachable_unchecked();
         };
@@ -617,10 +617,10 @@ pub(crate) unsafe extern "C" fn call_indirect(
                 let target = code.code.as_mut_ptr() as *mut u8;
 
                 // Store call frame on stack.
-                let new_sp: Sp = args.sp.cast::<u8>().offset(stack_offset as isize).cast();
+                let new_sp = args.sp.offset(stack_offset as isize);
                 args.align_ip(code::ALIGN);
                 ptr::write(
-                    new_sp.cast::<u8>().offset( -(size_of::<SavedRegs>() as isize)).cast(),
+                    new_sp.offset( -(size_of::<SavedRegs>() as isize)).cast(),
                     SavedRegs {
                         ip: args.ip(),
                         sp: args.sp,
@@ -631,14 +631,14 @@ pub(crate) unsafe extern "C" fn call_indirect(
 
                 // Update stack pointer and branch to target.
                 args.set_ip(target);
-                args.sp = new_sp;
+                args.sp = new_sp as Sp;
                 
                 // Execute next instruction
                 args.next()
             }
             FuncEntity::Host(func) => {
                 let mut stack = (*args.cx).stack.take().unwrap_unchecked();
-                stack.set_ptr(args.sp.cast::<u8>().offset(stack_offset as isize).cast());
+                stack.set_ptr(args.sp.offset(stack_offset as isize).cast());
                 let stack = match func.trampoline().clone().call((*args.cx).store, stack) {
                     Ok(stack) => stack,
                     Err(error) => {
@@ -1138,7 +1138,7 @@ where
         let mut mem: UnguardedMem = args.read_imm();
 
         // Perform operation
-        (*args.cx).stack.as_mut().unwrap_unchecked().set_ptr(args.sp);
+        (*args.cx).stack.as_mut().unwrap_unchecked().set_ptr(args.sp as *mut StackSlot);
         let old_size = mem
             .as_mut()
             .grow_with_stack(count, (*cx).stack.as_mut().unwrap_unchecked())
@@ -1391,13 +1391,13 @@ pub(crate) unsafe extern "C" fn enter(
         };
 
         // Check that the stack has enough space.
-        let stack_height = args.sp.offset_from((*args.cx).stack.as_mut().unwrap_unchecked().base_ptr()) as usize;
+        let stack_height = (args.sp as *mut StackSlot).offset_from((*args.cx).stack.as_mut().unwrap_unchecked().base_ptr()) as usize;
         if code.max_stack_height > Stack::SIZE - stack_height {
             return ControlFlow::Trap(Trap::StackOverflow).to_bits();
         }
 
         // Initialize the locals for this function to their default values.
-        ptr::write_bytes(args.sp, 0, code.local_count);
+        ptr::write_bytes(args.sp as *mut StackSlot, 0, code.local_count);
 
         if let Some(mut mem) = mem {
             let data = mem.as_mut().bytes_mut();
@@ -1500,7 +1500,7 @@ impl<'a> Args<'a> {
     unsafe fn read_stack<T>(&mut self) -> T {
         unsafe {
             let offset: i32 = self.read_imm();
-            ptr::read(self.sp.cast::<u8>().offset(offset as isize).cast::<T>())
+            ptr::read(self.sp.offset(offset as isize).cast::<T>())
         }
     }
 

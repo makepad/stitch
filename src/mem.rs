@@ -4,7 +4,7 @@ use {
         decode::{Decode, DecodeError, Decoder},
         exec::SavedRegs,
         limits::Limits,
-        stack::Stack,
+        stack::{Stack, StackSlot},
         store::{Handle, HandlePair, Store, StoreId, UnguardedHandle},
         trap::Trap,
     },
@@ -217,7 +217,7 @@ impl MemEntity {
         let mut ptr = stack.ptr();
         while ptr != stack.base_ptr() {
             let saved_regs: &mut SavedRegs = &mut *ptr.cast::<u8>().offset(-(size_of::<SavedRegs>() as isize)).cast();
-            ptr = saved_regs.sp;
+            ptr = saved_regs.sp as *mut StackSlot;
             if saved_regs.md == old_data {
                 saved_regs.md = new_data;
                 saved_regs.ms = new_size;
