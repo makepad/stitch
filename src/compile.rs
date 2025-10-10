@@ -19,7 +19,7 @@ use {
         ref_::RefType,
         store::Store,
         table::{TableEntity, TableEntityT},
-        val::{UnguardedVal, ValType, ValTypeOf},
+        val::{UnguardedVal, Val, ValType, ValTypeOf},
     },
     std::{mem, ops::{Deref, Index, IndexMut}, ptr},
 };
@@ -166,7 +166,7 @@ struct Compile<'a> {
 
 impl<'a> Compile<'a> {
     fn compile_select(&mut self, type_: Option<ValType>) -> Result<(), DecodeError> {
-// Skip this instruction if it is unreachable.
+        // Skip this instruction if it is unreachable.
         if self.block(0).is_unreachable {
             return Ok(());
         }
@@ -231,7 +231,7 @@ impl<'a> Compile<'a> {
         }
 
         // Push the output onto the stack and allocate a register for it.
-        self.push_opd(type_);
+        self.push_temp_opd(type_);
         self.alloc_reg();
 
         Ok(())
@@ -289,7 +289,7 @@ impl<'a> Compile<'a> {
         self.pop_opd();
 
         // Push the output onto the stack and allocate a register for it.
-        self.push_opd(output_type);
+        self.push_temp_opd(output_type);
         self.alloc_reg();
 
         self.emit(arg.offset);
@@ -378,7 +378,7 @@ impl<'a> Compile<'a> {
         self.pop_opd();
 
         // Push the output onto the stack and allocate a register for it.
-        self.push_opd(output_type);
+        self.push_temp_opd(output_type);
         self.alloc_reg();
 
         Ok(())
@@ -458,7 +458,7 @@ impl<'a> Compile<'a> {
         }
 
         for label_type in self.block(label_idx).label_types().iter().copied() {
-            self.push_opd(label_type);
+            self.push_temp_opd(label_type);
         }
 
         Ok(())
@@ -510,7 +510,7 @@ impl<'a> Compile<'a> {
         self.pop_opd();
 
         // Push the output onto the stack and allocate a register for it.
-        self.push_opd(output_type);
+        self.push_temp_opd(output_type);
         self.alloc_reg();
 
         Ok(())
@@ -535,7 +535,7 @@ impl<'a> Compile<'a> {
     /// index.
     ///
     /// This marks the operand as a local operand.
-    fn push_local_opd(&mut self, local_idx: usize) {
+    fn insert_local_opd(&mut self, local_idx: usize) {
         let opd_idx = self.opds.len() - 1;
 
         debug_assert!(self.opds[opd_idx].local_idx.is_none());
@@ -643,7 +643,7 @@ impl<'a> Compile<'a> {
 
         // Push the inputs of the block on the stack.
         for input_type in self.block(0).type_.clone().params().iter().copied() {
-            self.push_opd(input_type);
+            self.push_temp_opd(input_type);
         }
     }
 
@@ -712,9 +712,37 @@ impl<'a> Compile<'a> {
         self.remove_local_opd(opd_idx);
     }
 
-    /// Pushes an operand of the given type on the stack.
-    fn push_opd(&mut self, type_: impl Into<ValType>) {
-        let type_ = type_.into();
+    /// Pushes a constant operand on the stack with the given value.
+    fn push_const_opd(&mut self, val: Val) {
+        let stack_offset = self.stack.alloc(val.type_().padded_size_of());
+        self.opds.push(Opd {
+            type_: val.type_(),
+            stack_offset,
+            val: Some(val),
+            local_idx: None,
+            prev_opd_idx: None,
+            next_opd_idx: None,
+            is_reg: false,
+        });
+    }
+
+    /// Pushes a local operand referring to the local with the given index on the stack.
+    fn push_local_opd(&mut self, local_idx: usize) {
+        let local_type = self.locals[local_idx].type_;
+        let stack_offset = self.stack.alloc(local_type.padded_size_of());
+        self.opds.push(Opd {
+            type_: local_type,
+            stack_offset,
+            val: None,
+            local_idx: Some(local_idx),
+            prev_opd_idx: None,
+            next_opd_idx: None,
+            is_reg: false,
+        });
+    }
+
+    /// Pushes a temporary operand of the given type on the stack.
+    fn push_temp_opd(&mut self, type_: ValType) {
         let stack_offset = self.stack.alloc(type_.padded_size_of());
         self.opds.push(Opd {
             type_,
@@ -858,8 +886,8 @@ impl<'a> Compile<'a> {
     }
 
     // Emits an immediate value.
-    fn emit_val(&mut self, val: UnguardedVal) {
-        match val {
+    fn emit_val(&mut self, val: Val) {
+        match val.to_unguarded(self.store.id()) {
             UnguardedVal::I32(val) => self.emit(val),
             UnguardedVal::I64(val) => self.emit(val),
             UnguardedVal::F32(val) => self.emit(val),
@@ -1148,7 +1176,7 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the outputs of the block onto the stack.
         for result_type in block.type_.results().iter().copied() {
-            self.push_opd(result_type);
+            self.push_temp_opd(result_type);
         }
 
         Ok(())
@@ -1233,7 +1261,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         for label_type in self.block(label_idx).label_types().iter().copied() {
-            self.push_opd(label_type);
+            self.push_temp_opd(label_type);
         }
 
         Ok(())
@@ -1287,7 +1315,7 @@ impl<'a> InstrVisitor for Compile<'a> {
                 let label_idx = label_idx as usize;
                 self.emit_label(label_idx);
                 for label_type in self.block(0).label_types().iter().copied() {
-                    self.push_opd(label_type);
+                    self.push_temp_opd(label_type);
                 }
             }
             self.emit_label(default_label_idx);
@@ -1314,7 +1342,7 @@ impl<'a> InstrVisitor for Compile<'a> {
                 self.emit_instr(exec::br as ThreadedInstr);
                 self.emit_label(label_idx);
                 for label_type in self.block(label_idx).label_types().iter().copied() {
-                    self.push_opd(label_type);
+                    self.push_temp_opd(label_type);
                 }
             }
             self.patch_hole(default_hole_offset);
@@ -1427,7 +1455,7 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the outputs onto the stack.
         for result_type in type_.results().iter().copied() {
-            self.push_opd(result_type);
+            self.push_temp_opd(result_type);
         }
         Ok(())
     }
@@ -1493,7 +1521,7 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the outputs onto the stack.
         for result_type in type_.results().iter().copied() {
-            self.push_opd(result_type);
+            self.push_temp_opd(result_type);
         }
 
         Ok(())
@@ -1517,7 +1545,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         };
 
         // Push the output onto the stack and emit its stack offset.
-        self.push_opd(ValType::FuncRef);
+        self.push_temp_opd(ValType::FuncRef);
         self.emit_stack_offset(self.opd_stack_offset(0));
 
         Ok(())
@@ -1540,7 +1568,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.pop_opd();
 
         // Push the output onto the stack and allocate a register for it.
-        self.push_opd(ValType::I32);
+        self.push_temp_opd(ValType::I32);
         self.alloc_reg();
 
         Ok(())
@@ -1563,7 +1591,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit(func.to_unguarded(self.store.id()));
 
         // Push the output onto the stack and emit its stack offset.
-        self.push_opd(ValType::FuncRef);
+        self.push_temp_opd(ValType::FuncRef);
         self.emit_stack_offset(self.opd_stack_offset(0));
 
         Ok(())
@@ -1618,8 +1646,8 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the output onto the stack and append it to the list of operands that refer to this
         // local.
-        self.push_opd(self.locals[local_idx].type_);
         self.push_local_opd(local_idx);
+        self.insert_local_opd(local_idx);
 
         Ok(())
     }
@@ -1691,7 +1719,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit(global.to_unguarded(self.store.id()));
 
         // Push the output onto the stack and emit its stack offset.
-        self.push_opd(val_type);
+        self.push_temp_opd(val_type);
         self.emit_stack_offset(self.opd_stack_offset(0));
 
         Ok(())
@@ -1749,7 +1777,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit(table.to_unguarded(self.store.id()));
 
         // Push the output onto the stack and emit its stack offset.
-        self.push_opd(ValType::I32);
+        self.push_temp_opd(ValType::I32);
         self.emit_stack_offset(self.opd_stack_offset(0));
 
         Ok(())
@@ -1806,7 +1834,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit(table.to_unguarded(self.store.id()));
 
         // Push the output onto the stack and emit its stack offset.
-        self.push_opd(ValType::I32);
+        self.push_temp_opd(ValType::I32);
         self.emit_stack_offset(self.opd_stack_offset(0));
 
         Ok(())
@@ -1846,7 +1874,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit(table.to_unguarded(self.store.id()));
 
         // Push the output onto the stack and emit its stack offset.
-        self.push_opd(ValType::I32);
+        self.push_temp_opd(ValType::I32);
         self.emit_stack_offset(self.opd_stack_offset(0));
 
         Ok(())
@@ -2108,7 +2136,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit(mem.to_unguarded(self.store.id()));
 
         // Push the output onto the stack and emit its stack offset.
-        self.push_opd(ValType::I32);
+        self.push_temp_opd(ValType::I32);
         self.emit_stack_offset(self.opd_stack_offset(0));
 
         Ok(())
@@ -2142,7 +2170,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit(mem.to_unguarded(self.store.id()));
 
         // Push the output onto the stack and emit its stack offset.
-        self.push_opd(ValType::I32);
+        self.push_temp_opd(ValType::I32);
         self.emit_stack_offset(self.opd_stack_offset(0));
 
         Ok(())
@@ -2286,8 +2314,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         // Push the output onto the stack and set its value.
         //
         // Setting its value will mark the operand as a immediate operand.
-        self.push_opd(ValType::I32);
-        self.opd_mut(0).val = Some(UnguardedVal::I32(val));
+        self.push_const_opd(Val::I32(val));
         Ok(())
     }
 
@@ -2301,8 +2328,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         // Push the output onto the stack and set its value.
         //
         // Setting its value will mark the operand as a immediate operand.
-        self.push_opd(ValType::I64);
-        self.opd_mut(0).val = Some(UnguardedVal::I64(val));
+        self.push_const_opd(Val::I64(val));
 
         Ok(())
     }
@@ -2317,8 +2343,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         // Push the output onto the stack and set its value.
         //
         // Setting its value will mark the operand as a immediate operand.
-        self.push_opd(ValType::F32);
-        self.opd_mut(0).val = Some(UnguardedVal::F32(val));
+        self.push_const_opd(Val::F32(val));
 
         Ok(())
     }
@@ -2333,8 +2358,8 @@ impl<'a> InstrVisitor for Compile<'a> {
         // Push the output onto the stack and set its value.
         //
         // Setting its value will mark the operand as a constant.
-        self.push_opd(ValType::F64);
-        self.opd_mut(0).val = Some(UnguardedVal::F64(val));
+        self.push_const_opd(Val::F64(val));
+        self.opd_mut(0).val = Some(Val::F64(val));
 
         Ok(())
     }
@@ -3008,7 +3033,7 @@ struct Opd {
     type_: ValType,
     stack_offset: usize,
     // The value of this operand, if it is a immediate operand.
-    val: Option<UnguardedVal>,
+    val: Option<Val>,
     // The index of the local this operand refers to, if it is a local operand.
     local_idx: Option<usize>,
     // The index of the previous operand in the list of operands for the local that this operand
