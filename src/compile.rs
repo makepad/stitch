@@ -72,8 +72,7 @@ impl Compiler {
             blocks: &mut self.blocks,
             opds: &mut self.opds,
             fixup_offsets: &mut self.fixup_offsets,
-            first_temp_stack_offset: 0,
-            max_stack_height: 0,
+            stack: Stack::new(),
             regs: Regs::new(),
             code: CodeBuilder::new(),
         };
@@ -86,17 +85,14 @@ impl Compiler {
             });
             stack_offset += type_.padded_size_of() as isize;
         }
-        let mut stack_offset = 0usize;
         for type_ in code.locals.iter().copied() {
+            let stack_offset = compile.stack.alloc(type_.padded_size_of());
             compile.locals.push(Local {
                 type_,
                 stack_offset: stack_offset as isize,
                 first_opd_idx: None,
             });
-            stack_offset += type_.padded_size_of();
         }
-        compile.first_temp_stack_offset = stack_offset as usize;
-        compile.max_stack_height = stack_offset;
         compile.push_block(
             BlockKind::Block,
             FuncType::new([], type_.results().iter().copied()),
@@ -115,14 +111,13 @@ impl Compiler {
             let instr = compile.instr_stream.next().unwrap();
             instr.visit(&mut compile).unwrap();
         }
-        let mut src_stack_offset = compile.first_temp_stack_offset as isize;
-        let mut dst_stack_offset = -(exec::call_frame_size(&compile.type_) as isize);
-        for result_type in compile.type_.clone().results().iter().copied() {
+        let mut result_stack_offset = -(exec::call_frame_size(&compile.type_) as isize);
+        for (result_idx, result_type) in compile.type_.clone().results().iter().copied().enumerate() {
+            let opd_depth = compile.type_.results().len() - 1 - result_idx;
             compile.emit_instr(select_copy(result_type, OpdKind::Stk));
-            compile.emit_stack_offset(src_stack_offset);
-            compile.emit_stack_offset(dst_stack_offset);
-            src_stack_offset += result_type.padded_size_of() as isize;
-            dst_stack_offset += result_type.padded_size_of() as isize;
+            compile.emit_opd(opd_depth);
+            compile.emit_stack_offset(result_stack_offset);
+            result_stack_offset += result_type.padded_size_of() as isize;
         }
         compile.emit_instr(exec::return_ as ThreadedInstr);
 
@@ -139,7 +134,7 @@ impl Compiler {
         self.instr_stream_allocs = compile.instr_stream.into_allocs();
 
         CompiledFuncBody {
-            max_stack_height: compile.max_stack_height,
+            max_stack_height: compile.stack.max_height(),
             local_count: compile.locals.len() - compile.type_.params().len(),
             code,
         }
@@ -164,8 +159,7 @@ struct Compile<'a> {
     blocks: &'a mut Vec<Block>,
     opds: &'a mut Vec<Opd>,
     fixup_offsets: &'a mut Vec<usize>,
-    first_temp_stack_offset: usize,
-    max_stack_height: usize,
+    stack: Stack,
     regs: Regs,
     code: CodeBuilder
 }
@@ -641,7 +635,7 @@ impl<'a> Compile<'a> {
             type_,
             is_unreachable: false,
             height: self.opds.len(),
-            stack_offset: self.temp_stack_offset(self.opds.len()) as usize,
+            stack_offset: self.stack.height(),
             first_instr_offset: self.code.len(),
             first_hole_offset: None,
             else_hole_offset: None,
@@ -705,7 +699,7 @@ impl<'a> Compile<'a> {
         let opd_idx = self.opds.len() - 1 - opd_depth;
         self.emit_instr(select_copy(self.opds[opd_idx].type_, OpdKind::Imm));
         self.emit_val(self.opds[opd_idx].val.unwrap());
-        self.emit_stack_offset(self.temp_stack_offset(opd_idx));
+        self.emit_stack_offset(self.opds[opd_idx].stack_offset as isize);
         self.opd_mut(opd_depth).val = None;
     }
 
@@ -714,26 +708,27 @@ impl<'a> Compile<'a> {
         let local_idx = self.opds[opd_idx].local_idx.unwrap();
         self.emit_instr(select_copy(self.locals[local_idx].type_, OpdKind::Stk));
         self.emit_stack_offset(self.locals[local_idx].stack_offset);
-        self.emit_stack_offset(self.temp_stack_offset(opd_idx));
+        self.emit_stack_offset(self.opds[opd_idx].stack_offset as isize);
         self.remove_local_opd(opd_idx);
     }
 
     /// Pushes an operand of the given type on the stack.
     fn push_opd(&mut self, type_: impl Into<ValType>) {
+        let type_ = type_.into();
+        let stack_offset = self.stack.alloc(type_.padded_size_of());
         self.opds.push(Opd {
-            type_: type_.into(),
+            type_,
+            stack_offset,
             val: None,
             local_idx: None,
             prev_opd_idx: None,
             next_opd_idx: None,
             is_reg: false,
         });
-        let stack_height = self.first_temp_stack_offset as usize + (self.opds.len() - 1) * 8;
-        self.max_stack_height = self.max_stack_height.max(stack_height);
     }
 
     /// Pops an operand from the stack.
-    fn pop_opd(&mut self) -> ValType {
+    fn pop_opd(&mut self) {
         if self.opd(0).is_reg {
             self.dealloc_reg(self.opd(0).type_.reg_name());
         }
@@ -741,7 +736,8 @@ impl<'a> Compile<'a> {
         if let Some(local_idx) = self.opds[opd_idx].local_idx {
             self.locals[local_idx].first_opd_idx = self.opds[opd_idx].next_opd_idx;
         }
-        self.opds.pop().unwrap().type_
+        let opd = self.opds.pop().unwrap();
+        self.stack.dealloc(opd.stack_offset);
     }
 
     /// Emits an operand and then pops it from the stack.
@@ -750,20 +746,13 @@ impl<'a> Compile<'a> {
         self.pop_opd();
     }
 
-    // Methods for operating on the stack.
-
-    /// Returns the stack index of the temporary with the given index.
-    fn temp_stack_offset(&self, temp_idx: usize) -> isize {
-        (self.first_temp_stack_offset + temp_idx * 8) as isize
-    }
-
     /// Returns the stack index of the operand at the given depth.
     fn opd_stack_offset(&self, opd_depth: usize) -> isize {
         let opd_idx = self.opds.len() - 1 - opd_depth;
         if let Some(local_idx) = self.opds[opd_idx].local_idx {
             self.locals[local_idx].stack_offset
         } else {
-            self.temp_stack_offset(opd_idx)
+            self.opds[opd_idx].stack_offset as isize
         }
     }
 
@@ -799,7 +788,7 @@ impl<'a> Compile<'a> {
         let opd_idx = self.regs[reg_name].opd_idx().unwrap();
         let opd_type = self.opds[opd_idx].type_;
         self.emit_instr(select_copy(opd_type, OpdKind::Reg));
-        self.emit_stack_offset(self.temp_stack_offset(opd_idx));
+        self.emit_stack_offset(self.opds[opd_idx].stack_offset as isize);
         self.dealloc_reg(reg_name);
     }
 
@@ -1421,9 +1410,9 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Compute the start and end of the call frame, and update the maximum stack height
         // attained by the [`Func`] being compiled.
-        let call_frame_stack_start = self.first_temp_stack_offset + self.opds.len() * 8;
-        let call_frame_stack_end = call_frame_stack_start + exec::call_frame_size(&type_);
-        self.max_stack_height = self.max_stack_height.max(call_frame_stack_end);
+        let call_frame_stack_start = self.stack.alloc(exec::call_frame_size(&type_));
+        let call_frame_stack_end = self.stack.height();
+        self.stack.dealloc(call_frame_stack_start);
 
         // Emit the stack offset of the end of the call frame.
         self.emit_stack_offset(call_frame_stack_end as isize);
@@ -1488,10 +1477,10 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Compute the start and end of the call frame, and update the maximum stack height
         // attained by the [`Func`] being compiled.
-        let call_frame_stack_start = self.first_temp_stack_offset + self.opds.len() * 8;
-        let call_frame_stack_end = call_frame_stack_start + exec::call_frame_size(&type_);
-        self.max_stack_height = self.max_stack_height.max(call_frame_stack_end as usize);
-
+        let call_frame_stack_start = self.stack.alloc(exec::call_frame_size(&type_));
+        let call_frame_stack_end = self.stack.height();
+        self.stack.dealloc(call_frame_stack_start);
+        
         // Emit the stack offset of the end of the call frame.
         self.emit_stack_offset(call_frame_stack_end as isize);
 
@@ -3017,6 +3006,7 @@ impl Deref for LabelTypes {
 struct Opd {
     // The type of this operand.
     type_: ValType,
+    stack_offset: usize,
     // The value of this operand, if it is a immediate operand.
     val: Option<UnguardedVal>,
     // The index of the local this operand refers to, if it is a local operand.
@@ -3074,7 +3064,39 @@ enum OpdKind {
     Imm,
 }
 
-// Registers
+#[derive(Debug)]
+struct Stack {
+    height: usize,
+    max_height: usize,
+}
+
+impl Stack {
+    fn new() -> Self {
+        Self {
+            height: 0,
+            max_height: 0,
+        }
+    }
+
+    fn height(&self) -> usize {
+        self.height
+    }
+
+    fn max_height(&self) -> usize {
+        self.max_height
+    }
+
+    fn alloc(&mut self, size: usize) -> usize {
+        let offset = self.height;
+        self.height += size;
+        self.max_height = self.max_height.max(self.height);
+        offset
+    }
+
+    fn dealloc(&mut self, offset: usize) {
+        self.height = offset;
+    }
+}
 
 /// A set of registers.
 #[derive(Debug)]
