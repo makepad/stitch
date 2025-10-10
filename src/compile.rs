@@ -207,13 +207,13 @@ impl<'a> Compile<'a> {
         // The only exception is if one of the inputs occupies the output register. In that case,
         // the select instruction can safely overwrite the register, since the input will be
         // consumed by the instruction anyway.
-        let output_reg_idx = type_.reg_name();
-        if self.is_reg_occupied(output_reg_idx)
-            && !self.opd(2).occupies_reg(output_reg_idx)
-            && !self.opd(1).occupies_reg(output_reg_idx)
-            && !self.opd(0).occupies_reg(output_reg_idx)
+        let output_reg_name = RegName::for_val_type(type_);
+        if self.is_reg_occupied(output_reg_name)
+            && !self.opd(2).occupies_reg(output_reg_name)
+            && !self.opd(1).occupies_reg(output_reg_name)
+            && !self.opd(0).occupies_reg(output_reg_name)
         {
-            self.preserve_reg(output_reg_idx);
+            self.preserve_reg(output_reg_name);
         }
 
         // Emit the instruction.
@@ -276,9 +276,9 @@ impl<'a> Compile<'a> {
         // The only exception is if the input occupies the output register. In that case, the
         // operation can safely overwrite the register, since the input will be consumed by the
         // operation anyway.
-        let output_reg_idx = output_type.reg_name();
-        if self.is_reg_occupied(output_reg_idx) && !self.opd(0).occupies_reg(output_reg_idx) {
-            self.preserve_reg(output_reg_idx);
+        let output_reg_name = RegName::for_val_type(output_type);
+        if self.is_reg_occupied(output_reg_name) && !self.opd(0).occupies_reg(output_reg_name) {
+            self.preserve_reg(output_reg_name);
         }
 
         // Emit the instruction.
@@ -365,9 +365,9 @@ impl<'a> Compile<'a> {
         // The only exception is if the input occupies the output register. In that case, the
         // operation can safely overwrite the register, since the input will be consumed by the
         // operation anyway.
-        let output_reg_idx = output_type.reg_name();
-        if self.is_reg_occupied(output_reg_idx) && !self.opd(0).occupies_reg(output_reg_idx) {
-            self.preserve_reg(output_reg_idx);
+        let output_reg_name = RegName::for_val_type(output_type);
+        if self.is_reg_occupied(output_reg_name) && !self.opd(0).occupies_reg(output_reg_name) {
+            self.preserve_reg(output_reg_name);
         }
 
         // Emit the instruction.
@@ -492,12 +492,12 @@ impl<'a> Compile<'a> {
         // The only exception is if one of the inputs occupies the output register. In that case,
         // the operation can safely overwrite the register, since the input will be consumed by the
         // operation anyway.
-        let output_reg_idx = output_type.reg_name();
-        if self.is_reg_occupied(output_reg_idx)
-            && !self.opd(1).occupies_reg(output_reg_idx)
-            && !self.opd(0).occupies_reg(output_reg_idx)
+        let output_reg_name = RegName::for_val_type(output_type);
+        if self.is_reg_occupied(output_reg_name)
+            && !self.opd(1).occupies_reg(output_reg_name)
+            && !self.opd(0).occupies_reg(output_reg_name)
         {
-            self.preserve_reg(output_reg_idx);
+            self.preserve_reg(output_reg_name);
         }
 
         // Emit the instruction.
@@ -689,8 +689,8 @@ impl<'a> Compile<'a> {
     // Ensures that the operand at the given depth is not a register operand, by preserving the
     // register on the stack if necessary.
     fn ensure_opd_not_reg(&mut self, opd_depth: usize) {
-        if self.opd(opd_depth).is_reg {
-            self.preserve_reg(self.opd(opd_depth).type_.reg_name());
+        if let Some(reg_name) = self.opd(opd_depth).reg_name {
+            self.preserve_reg(reg_name);
         }
     }
 
@@ -722,7 +722,7 @@ impl<'a> Compile<'a> {
             local_idx: None,
             prev_opd_idx: None,
             next_opd_idx: None,
-            is_reg: false,
+            reg_name: None,
         });
     }
 
@@ -737,7 +737,7 @@ impl<'a> Compile<'a> {
             local_idx: Some(local_idx),
             prev_opd_idx: None,
             next_opd_idx: None,
-            is_reg: false,
+            reg_name: None,
         });
     }
 
@@ -751,14 +751,14 @@ impl<'a> Compile<'a> {
             local_idx: None,
             prev_opd_idx: None,
             next_opd_idx: None,
-            is_reg: false,
+            reg_name: None,
         });
     }
 
     /// Pops an operand from the stack.
     fn pop_opd(&mut self) {
-        if self.opd(0).is_reg {
-            self.dealloc_reg(self.opd(0).type_.reg_name());
+        if let Some(reg_name) = self.opd(0).reg_name {
+            self.dealloc_reg(reg_name);
         }
         let opd_idx = self.opds.len() - 1;
         if let Some(local_idx) = self.opds[opd_idx].local_idx {
@@ -793,12 +793,12 @@ impl<'a> Compile<'a> {
 
     /// Allocates a register to the top operand.
     fn alloc_reg(&mut self) {
-        debug_assert!(!self.opd(0).is_reg);
-        let reg_name = self.opd(0).type_.reg_name();
+        debug_assert!(self.opd(0).reg_name.is_none());
+        let reg_name = RegName::for_val_type(self.opd(0).type_);
         let reg = &mut self.regs[reg_name];
         debug_assert!(!reg.is_used());
         let opd_idx = self.opds.len() - 1;
-        self.opds[opd_idx].is_reg = true;
+        self.opds[opd_idx].reg_name = Some(reg_name);
         reg.alloc(opd_idx);
     }
 
@@ -806,7 +806,7 @@ impl<'a> Compile<'a> {
     fn dealloc_reg(&mut self, reg_name: RegName) {
         let reg = &mut self.regs[reg_name];
         let opd_idx = reg.opd_idx().unwrap();
-        self.opds[opd_idx].is_reg = false;
+        self.opds[opd_idx].reg_name = None;
         reg.dealloc();
     }
 
@@ -1379,7 +1379,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         {
             let opd_depth =  self.type_.results().len() - 1 - result_idx;
             self.ensure_opd_not_imm(opd_depth);
-            self.emit_instr(if self.opd(opd_depth).is_reg {
+            self.emit_instr(if self.opd(opd_depth).reg_name.is_some() {
                 select_copy(result_type, OpdKind::Reg)
             } else {
                 select_copy(result_type, OpdKind::Stk)
@@ -3042,8 +3042,8 @@ struct Opd {
     // The index of the next operand in the list of operands for the local this this operand refers
     // to, if it is a local operand.
     next_opd_idx: Option<usize>,
-    // Whether this operand is stored in a register.
-    is_reg: bool,
+    // The name of the register this operand occupies, if any.
+    reg_name: Option<RegName>,
 }
 
 impl Opd {
@@ -3059,14 +3059,14 @@ impl Opd {
 
     /// Returns `true` if this operand occupies the register with the given name.
     fn occupies_reg(&self, reg_name: RegName) -> bool {
-        self.is_reg && self.type_.reg_name() == reg_name
+        self.reg_name.is_some() && RegName::for_val_type(self.type_) == reg_name
     }
 
     /// Returns the kind of this operand (see [`OpdKind`]).
     fn kind(&self) -> OpdKind {
         if self.is_imm() {
             OpdKind::Imm
-        } else if self.is_reg {
+        } else if self.reg_name.is_some() {
             OpdKind::Reg
         } else {
             OpdKind::Stk
@@ -3176,6 +3176,15 @@ enum RegName {
 }
 
 impl RegName {
+    /// Returns the name of the register to be used for [`Val`]s of the given [`ValType`].
+    fn for_val_type(val_type: ValType) -> Self {
+        match val_type {
+            ValType::I32 | ValType::I64 | ValType::FuncRef | ValType::ExternRef => RegName::Ia,
+            ValType::F32 => RegName::Sa,
+            ValType::F64 => RegName::Da,
+        }
+    }
+
     /// Returns an iterator over all register names.
     fn iter() -> impl Iterator<Item = RegName> {
         [RegName::Ia, RegName::Sa, RegName::Da].into_iter()
@@ -3221,17 +3230,6 @@ impl Reg {
     fn dealloc(&mut self) {
         debug_assert!(self.is_used(), "register is already free");
         self.opd_idx = None;
-    }
-}
-
-impl ValType {
-    /// Returns the name of the register to be used for [`Val`]s of this [`ValType`].
-    fn reg_name(self) -> RegName {
-        match self {
-            ValType::I32 | ValType::I64 | ValType::FuncRef | ValType::ExternRef => RegName::Ia,
-            ValType::F32 => RegName::Sa,
-            ValType::F64 => RegName::Da,
-        }
     }
 }
 
