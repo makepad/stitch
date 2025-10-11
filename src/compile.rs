@@ -774,16 +774,6 @@ impl<'a> Compile<'a> {
         self.pop_opd();
     }
 
-    /// Returns the stack index of the operand at the given depth.
-    fn opd_stack_offset(&self, opd_depth: usize) -> isize {
-        let opd_idx = self.opds.len() - 1 - opd_depth;
-        if let Some(local_idx) = self.opds[opd_idx].local_idx {
-            self.locals[local_idx].stack_offset
-        } else {
-            self.opds[opd_idx].stack_offset as isize
-        }
-    }
-
     // Methods for operating on registers.
 
     /// Returns `true` if the register with the given index is occupied.
@@ -842,7 +832,7 @@ impl<'a> Compile<'a> {
         {
             let opd_depth = self.block(label_idx).label_types().len() - 1 - label_val_idx;
             self.emit_instr(select_copy(label_type, OpdKind::Stk));
-            self.emit_stack_offset(self.opd_stack_offset(opd_depth));
+            self.emit_opd(opd_depth);
             self.emit_stack_offset(label_val_stack_offset as isize);
             label_val_stack_offset += label_type.padded_size_of();
         }
@@ -876,12 +866,12 @@ impl<'a> Compile<'a> {
     // the stack slot for the operand. For immediate operands, which carry their own value, this
     // emits the value of the operand. For register operands, we don't need to anything.
     fn emit_opd(&mut self, opd_depth: usize) {
-        match self.opd(opd_depth).kind() {
-            OpdKind::Stk => self.emit_stack_offset(self.opd_stack_offset(opd_depth)),
-            OpdKind::Imm => {
-                self.emit_val(self.opd(opd_depth).val.unwrap());
-            }
-            OpdKind::Reg => {}
+        if let Some(val) = self.opd(opd_depth).val {
+            self.emit_val(val);
+        } else if let Some(local_idx) = self.opd(opd_depth).local_idx {
+            self.emit_stack_offset(self.locals[local_idx].stack_offset);
+        } else if self.opd(opd_depth).reg_name.is_none() {
+            self.emit_stack_offset(self.opd(opd_depth).stack_offset as isize);
         }
     }
 
@@ -1546,8 +1536,8 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the output onto the stack and emit its stack offset.
         self.push_temp_opd(ValType::FuncRef);
-        self.emit_stack_offset(self.opd_stack_offset(0));
-
+        self.emit_opd(0);
+        
         Ok(())
     }
 
@@ -1592,8 +1582,8 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the output onto the stack and emit its stack offset.
         self.push_temp_opd(ValType::FuncRef);
-        self.emit_stack_offset(self.opd_stack_offset(0));
-
+        self.emit_opd(0);
+        
         Ok(())
     }
 
@@ -1720,8 +1710,8 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the output onto the stack and emit its stack offset.
         self.push_temp_opd(val_type);
-        self.emit_stack_offset(self.opd_stack_offset(0));
-
+        self.emit_opd(0);
+        
         Ok(())
     }
 
@@ -1778,8 +1768,8 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the output onto the stack and emit its stack offset.
         self.push_temp_opd(ValType::I32);
-        self.emit_stack_offset(self.opd_stack_offset(0));
-
+        self.emit_opd(0);
+        
         Ok(())
     }
 
@@ -1835,8 +1825,8 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the output onto the stack and emit its stack offset.
         self.push_temp_opd(ValType::I32);
-        self.emit_stack_offset(self.opd_stack_offset(0));
-
+        self.emit_opd(0);
+        
         Ok(())
     }
 
@@ -1875,8 +1865,8 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the output onto the stack and emit its stack offset.
         self.push_temp_opd(ValType::I32);
-        self.emit_stack_offset(self.opd_stack_offset(0));
-
+        self.emit_opd(0);
+        
         Ok(())
     }
 
@@ -2137,8 +2127,8 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the output onto the stack and emit its stack offset.
         self.push_temp_opd(ValType::I32);
-        self.emit_stack_offset(self.opd_stack_offset(0));
-
+        self.emit_opd(0);
+        
         Ok(())
     }
 
@@ -2171,8 +2161,8 @@ impl<'a> InstrVisitor for Compile<'a> {
 
         // Push the output onto the stack and emit its stack offset.
         self.push_temp_opd(ValType::I32);
-        self.emit_stack_offset(self.opd_stack_offset(0));
-
+        self.emit_opd(0);
+        
         Ok(())
     }
 
