@@ -208,7 +208,7 @@ impl<'a> Compile<'a> {
         // the select instruction can safely overwrite the register, since the input will be
         // consumed by the instruction anyway.
         let output_reg_name = RegName::for_val_type(type_);
-        if self.is_reg_occupied(output_reg_name)
+        if self.regs[output_reg_name].is_used()
             && !self.opd(2).occupies_reg(output_reg_name)
             && !self.opd(1).occupies_reg(output_reg_name)
             && !self.opd(0).occupies_reg(output_reg_name)
@@ -277,7 +277,7 @@ impl<'a> Compile<'a> {
         // operation can safely overwrite the register, since the input will be consumed by the
         // operation anyway.
         let output_reg_name = RegName::for_val_type(output_type);
-        if self.is_reg_occupied(output_reg_name) && !self.opd(0).occupies_reg(output_reg_name) {
+        if self.regs[output_reg_name].is_used() && !self.opd(0).occupies_reg(output_reg_name) {
             self.preserve_reg(output_reg_name);
         }
 
@@ -366,7 +366,7 @@ impl<'a> Compile<'a> {
         // operation can safely overwrite the register, since the input will be consumed by the
         // operation anyway.
         let output_reg_name = RegName::for_val_type(output_type);
-        if self.is_reg_occupied(output_reg_name) && !self.opd(0).occupies_reg(output_reg_name) {
+        if self.regs[output_reg_name].is_used() && !self.opd(0).occupies_reg(output_reg_name) {
             self.preserve_reg(output_reg_name);
         }
 
@@ -493,7 +493,7 @@ impl<'a> Compile<'a> {
         // the operation can safely overwrite the register, since the input will be consumed by the
         // operation anyway.
         let output_reg_name = RegName::for_val_type(output_type);
-        if self.is_reg_occupied(output_reg_name)
+        if self.regs[output_reg_name].is_used()
             && !self.opd(1).occupies_reg(output_reg_name)
             && !self.opd(0).occupies_reg(output_reg_name)
         {
@@ -776,11 +776,6 @@ impl<'a> Compile<'a> {
 
     // Methods for operating on registers.
 
-    /// Returns `true` if the register with the given index is occupied.
-    fn is_reg_occupied(&self, reg_name: RegName) -> bool {
-        self.regs[reg_name].is_used()
-    }
-
     /// Allocates a register to the top operand.
     fn alloc_reg(&mut self) {
         debug_assert!(self.opd(0).reg_name.is_none());
@@ -813,7 +808,7 @@ impl<'a> Compile<'a> {
     /// Preserves all registers by preserving the register operands that occupy them.
     fn preserve_all_regs(&mut self) {
         for reg_name in RegName::iter() {
-            if self.is_reg_occupied(reg_name) {
+            if self.regs[reg_name].is_used() {
                 self.preserve_reg(reg_name);
             }
         }
