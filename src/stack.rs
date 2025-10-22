@@ -95,8 +95,6 @@ impl Drop for StackGuard {
     }
 }
 
-pub(crate) type StackSlot = u64;
-
 thread_local! {
     static STACK: Cell<Option<Stack>> = Cell::new(Some(Stack::new()));
 }

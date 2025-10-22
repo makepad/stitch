@@ -16,7 +16,7 @@ use {
         mem::UnguardedMem,
         ops::*,
         stack,
-        stack::{Stack, StackGuard, StackSlot},
+        stack::{Stack, StackGuard},
         store::{Handle, Store, UnguardedInternedFuncType},
         table::{TableEntity, TableEntityT, UnguardedTable},
         trap::Trap,
@@ -169,7 +169,7 @@ pub(crate) fn exec(
 
     // Check that the stack has enough space.
     let stack_height = unsafe { stack.ptr().offset_from(stack.base_ptr()) as usize };
-    if call_frame_size(&type_) / size_of::<StackSlot>() > Stack::SIZE - stack_height {
+    if call_frame_size(&type_) / 8 > Stack::SIZE - stack_height {
         return Err(Trap::StackOverflow)?;
     }
 
@@ -1396,7 +1396,7 @@ pub(crate) unsafe extern "C" fn enter(
         }
 
         // Initialize the locals for this function to their default values.
-        ptr::write_bytes(args.sp as *mut StackSlot, 0, code.local_count);
+        ptr::write_bytes(args.sp as *mut u64, 0, code.local_count);
 
         if let Some(mut mem) = mem {
             let data = mem.as_mut().bytes_mut();
