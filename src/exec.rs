@@ -10,13 +10,13 @@ use {
         error::Error,
         extern_::UnguardedExtern,
         extern_ref::UnguardedExternRef,
-        func::{Func, FuncBody, FuncEntity, FuncType, InstrSlot, UnguardedFunc},
+        func::{Caller, Func, FuncBody, FuncEntity, FuncType, InstrSlot, UnguardedFunc},
         func_ref::UnguardedFuncRef,
         global::{GlobalEntity, GlobalEntityT, UnguardedGlobal},
         mem::UnguardedMem,
         ops::*,
         stack,
-        stack::{Stack, StackGuard},
+        stack::Stack,
         store::{Handle, Store, UnguardedInternedFuncType},
         table::{TableEntity, TableEntityT, UnguardedTable},
         trap::Trap,
@@ -111,8 +111,8 @@ pub(crate) struct Context<'a> {
 
     // A mutable reference to the store in which we're executing.
     pub(crate) store: &'a mut Store,
-    // A scoped lock to the stack for the current thread.
-    pub(crate) stack: Option<StackGuard>,
+    // A mutable reference to the stack on which we're executing.
+    pub(crate) stack: &'a mut Stack,
     // Used to store out-of-band error data.
     pub(crate) error: Option<Error>,
 }
@@ -157,13 +157,11 @@ pub(crate) type ControlFlowBits = usize;
 /// The results are written to the `results` slice.
 pub(crate) fn exec(
     store: &mut Store,
+    stack: &mut Stack,
     func: Func,
     args: &[Val],
     results: &mut [Val],
 ) -> Result<(), Error> {
-    // Lock the stack for the current thread.
-    let mut stack = Stack::lock();
-
     // Obtain the type of the function.
     let type_ = func.type_(store).clone();
 
@@ -212,7 +210,7 @@ pub(crate) fn exec(
                 sa: 0.0,
                 da: 0.0,
                 store,
-                stack: Some(stack),
+                stack: &mut *stack,
                 error: None,
             };
 
@@ -234,29 +232,23 @@ pub(crate) fn exec(
                 .unwrap()
                 {
                     ControlFlow::Stop => {
-                        stack = context.stack.take().unwrap();
-
                         // Reset the stack to the start of the call frame.
-                        let stack_height = unsafe { ptr.offset_from(stack.as_ptr()) as usize };
-                        unsafe { stack.set_len(stack_height) };
+                        let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
+                        unsafe { context.stack.set_len(stack_height) };
 
                         break;
                     }
                     ControlFlow::Trap(trap) => {
-                        stack = context.stack.take().unwrap();
-
                         // Reset the stack to the start of the call frame.
-                        let stack_height = unsafe { ptr.offset_from(stack.as_ptr()) as usize };
-                        unsafe { stack.set_len(stack_height) };
+                        let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
+                        unsafe { context.stack.set_len(stack_height) };
 
                         return Err(trap)?;
                     }
                     ControlFlow::Error => {
-                        stack = context.stack.take().unwrap();
-
                         // Reset the stack to the start of the call frame.
-                        let stack_height = unsafe { ptr.offset_from(stack.as_ptr()) as usize };
-                        unsafe { stack.set_len(stack_height) };
+                        let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
+                        unsafe { context.stack.set_len(stack_height) };
 
                         return Err(context.error.take().unwrap());
                     }
@@ -269,7 +261,10 @@ pub(crate) fn exec(
             unsafe { stack.set_len(stack_height) };
 
             // Call the [`HostTrampoline`] of the [`HostFuncEntity`].
-            stack = func.trampoline().clone().call(store, stack)?;
+            func.trampoline().clone().call(Caller {
+                store,
+                stack,
+            })?;
 
             // Reset the stack to the start of the call frame.
             let stack_height = unsafe { ptr.offset_from(stack.as_ptr()) as usize };
@@ -547,20 +542,19 @@ pub(crate) unsafe extern "C" fn call_host(
         let offset: i32 = args.read_imm();
         let mem: Option<UnguardedMem> = args.read_imm();
 
-        let mut stack = (*args.cx).stack.take().unwrap_unchecked();
+        let stack = &mut *(*args.cx).stack;
         let stack_height = args.sp.offset(offset as isize).offset_from(stack.as_ptr()) as usize;
         stack.set_len(stack_height);
         let FuncEntity::Host(func) = func.as_ref() else {
             hint::unreachable_unchecked();
         };
-        let stack = match func.trampoline().clone().call((*args.cx).store, stack) {
+        match func.trampoline().clone().call(Caller { store: &mut *(*args.cx).store, stack }) {
             Ok(stack) => stack,
             Err(error) => {
                 (*args.cx).error = Some(error);
                 return ControlFlow::Error.to_bits();
             }
         };
-        (*args.cx).stack = Some(stack);
 
         // If the host function called `memory.grow`, `md` and `ms` are out of date. To ensure that `md`
         // and `ms` are up to date, we reset them here.
@@ -641,17 +635,16 @@ pub(crate) unsafe extern "C" fn call_indirect(
                 args.next()
             }
             FuncEntity::Host(func) => {
-                let mut stack = (*args.cx).stack.take().unwrap_unchecked();
+                let stack = &mut *(*args.cx).stack;
                 let stack_height = args.sp.offset(stack_offset as isize).offset_from(stack.as_ptr()) as usize;
                 stack.set_len(stack_height);
-                let stack = match func.trampoline().clone().call((*args.cx).store, stack) {
+                match func.trampoline().clone().call(Caller { store: &mut *(*args.cx).store, stack }) {
                     Ok(stack) => stack,
                     Err(error) => {
                         (*cx).error = Some(error);
                         return ControlFlow::Error.to_bits();
                     }
                 };
-                (*args.cx).stack = Some(stack);
 
                 // If the host function called `memory.grow`, `md` and `ms` are out of date. To ensure
                 // that `md` and `ms` are up to date, we reset them here.
@@ -1143,12 +1136,12 @@ where
         let mut mem: UnguardedMem = args.read_imm();
 
         // Perform operation
-        let stack = (*args.cx).stack.as_mut().unwrap_unchecked();
+        let stack = &mut *(*args.cx).stack;
         let stack_height = args.sp.offset_from(stack.as_ptr()) as usize;
         stack.set_len(stack_height);
         let old_size = mem
             .as_mut()
-            .grow_with_stack(count, stack)
+            .grow_with_stack(count, Some(stack))
             .unwrap_or(u32::MAX);
         let bytes = mem.as_mut().bytes_mut();
         args.md = bytes.as_mut_ptr();
@@ -1398,7 +1391,7 @@ pub(crate) unsafe extern "C" fn enter(
         };
 
         // Check that the stack has enough space.
-        let stack = (*args.cx).stack.as_mut().unwrap_unchecked();
+        let stack = &mut *(*args.cx).stack;
         let stack_height = (args.sp).offset_from(stack.as_mut_ptr()) as usize;
         if code.max_stack_height > stack.capacity() - stack_height {
             return ControlFlow::Trap(Trap::StackOverflow).to_bits();

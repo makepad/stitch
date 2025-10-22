@@ -3,6 +3,7 @@ use {
         data::{Data, DataEntity},
         decode::{Decode, DecodeError, Decoder},
         exec::SavedRegs,
+        func::Context,
         limits::Limits,
         stack::Stack,
         store::{Handle, HandlePair, Store, StoreId, UnguardedHandle},
@@ -56,8 +57,9 @@ impl Mem {
     /// # Errors
     ///
     /// If this [`Mem`] failed to grow.
-    pub fn grow(self, store: &mut Store, count: u32) -> Result<u32, MemError> {
-        self.0.as_mut(store).grow(count)
+    pub fn grow(self, mut context: impl Context, count: u32) -> Result<u32, MemError> {
+        let (context, stack) = context.into_parts();
+        self.0.as_mut(context).grow(stack, count)
     }
 
     pub(crate) fn init(
@@ -189,15 +191,14 @@ impl MemEntity {
     /// # Errors
     ///
     /// If this [`MemEntity`] failed to grow.
-    pub(crate) fn grow(&mut self, count: u32) -> Result<u32, MemError> {
-        let mut stack = Stack::lock();
-        unsafe { self.grow_with_stack(count, &mut stack) }
+    pub(crate) fn grow(&mut self, stack: Option<&mut Stack>, count: u32) -> Result<u32, MemError> {
+        unsafe { self.grow_with_stack(count, stack) }
     }
 
     pub(crate) unsafe fn grow_with_stack(
         &mut self,
         count: u32,
-        stack: &mut Stack,
+        stack: Option<&mut Stack>,
     ) -> Result<u32, MemError> {
         if count > self.max.unwrap_or(65_536) - self.size() {
             return Err(MemError::FailedToGrow);
@@ -209,18 +210,20 @@ impl MemEntity {
             .resize((new_size as usize).checked_mul(PAGE_SIZE).unwrap(), 0);
         let new_data = self.bytes.as_mut_ptr();
 
-        // Each call frame on the stack stores the value of the `md` and `ms` register. Growing
-        // this [`Memory`] invalidates all call frames for which `md` and `ms` store a pointer to
-        // the old data and size of this [`Memory`]. To fix this, we need to iterate over the call
-        // frames on the stack, and update the value of the `md` and `ms` register to store
-        // a pointer to the new data and size of this [`Memory`] instead.
-        let mut ptr = stack.as_mut_ptr().add(stack.len());
-        while ptr != stack.as_mut_ptr() {
-            let saved_regs: &mut SavedRegs = &mut *ptr.offset(-(size_of::<SavedRegs>() as isize)).cast();
-            ptr = saved_regs.sp;
-            if saved_regs.md == old_data {
-                saved_regs.md = new_data;
-                saved_regs.ms = new_size;
+        if let Some(stack) = stack {
+            // Each call frame on the stack stores the value of the `md` and `ms` register. Growing
+            // this [`Memory`] invalidates all call frames for which `md` and `ms` store a pointer to
+            // the old data and size of this [`Memory`]. To fix this, we need to iterate over the call
+            // frames on the stack, and update the value of the `md` and `ms` register to store
+            // a pointer to the new data and size of this [`Memory`] instead.
+            let mut ptr = stack.as_mut_ptr().add(stack.len());
+            while ptr != stack.as_mut_ptr() {
+                let saved_regs: &mut SavedRegs = &mut *ptr.offset(-(size_of::<SavedRegs>() as isize)).cast();
+                ptr = saved_regs.sp;
+                if saved_regs.md == old_data {
+                    saved_regs.md = new_data;
+                    saved_regs.ms = new_size;
+                }
             }
         }
 

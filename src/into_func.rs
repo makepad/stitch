@@ -2,9 +2,9 @@ use crate::{
     exec,
     error::Error,
     extern_ref::{ExternRef, UnguardedExternRef},
-    func::{FuncType, HostFuncTrampoline},
+    func::{Caller, FuncType, HostFuncTrampoline},
     func_ref::{FuncRef, UnguardedFuncRef},
-    stack::{Stack, StackGuard, padded_size_of},
+    stack::padded_size_of,
     store::{Store, StoreId},
     val::ValType,
 };
@@ -57,13 +57,13 @@ macro_rules! impl_into_fund {
 
             #[allow(non_snake_case)]
             fn into_func(self) -> (FuncType, HostFuncTrampoline) {
-                IntoFunc::into_func(move |_store: &mut Store, $($Ti,)*| self($($Ti,)*))
+                IntoFunc::into_func(move |_: Caller, $($Ti,)*| self($($Ti,)*))
             }
         }
 
         impl<F, $($Ti,)* U> IntoFunc<(&mut Store, $($Ti,)*), U> for F
         where
-            F: Fn(&mut Store, $($Ti,)*) -> U + Send + Sync + 'static,
+            F: Fn(Caller, $($Ti,)*) -> U + Send + Sync + 'static,
             $($Ti: HostVal,)*
             U: HostResult
         {
@@ -79,19 +79,20 @@ macro_rules! impl_into_fund {
                 let call_frame_size = exec::call_frame_size(&type_);
                 (
                     type_,
-                    HostFuncTrampoline::new(move |store, mut stack| -> Result<StackGuard, Error> {
+                    HostFuncTrampoline::new(move |caller: Caller| -> Result<(), Error> {
                         let ($($Ti,)*) = unsafe {
-                            let mut ptr = stack.as_mut_ptr().add(stack.len() - call_frame_size);
-                            Self::Params::read_from_stack(&mut ptr, store.id())
+                            let mut ptr = caller.stack.as_mut_ptr().add(caller.stack.len() - call_frame_size);
+                            Self::Params::read_from_stack(&mut ptr, caller.store.id())
                         };
-                        drop(stack);
-                        let results = self(store, $($Ti,)*).into_result()?;
-                        let mut stack = Stack::lock();
+                        let results = self(Caller {
+                            store: &mut *caller.store,
+                            stack: &mut *caller.stack,
+                        }, $($Ti,)*).into_result()?;
                         unsafe {
-                            let mut ptr = stack.as_mut_ptr().add(stack.len() - call_frame_size);
-                            results.write_to_stack(&mut ptr, store.id())
+                            let mut ptr = caller.stack.as_mut_ptr().add(caller.stack.len() - call_frame_size);
+                            results.write_to_stack(&mut ptr, caller.store.id())
                         }
-                        Ok(stack)
+                        Ok(())
                     })
                 )
             }

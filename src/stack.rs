@@ -1,8 +1,5 @@
 use std::{
     alloc::{alloc_zeroed, dealloc, handle_alloc_error, Layout},
-    cell::Cell,
-    mem::ManuallyDrop,
-    ops::{Deref, DerefMut},
     ptr::NonNull,
 };
 
@@ -16,13 +13,6 @@ pub struct Stack {
 }
 
 impl Stack {
-    /// Locks the [`Stack`] for the current thread, returning a [`StackGuard`].
-    pub fn lock() -> StackGuard {
-        StackGuard {
-            stack: ManuallyDrop::new(STACK.take().unwrap()),
-        }
-    }
-
     pub(crate) fn new(capacity: usize) -> Self {
         let ptr = if capacity == 0 {
             NonNull::dangling()
@@ -68,35 +58,6 @@ impl Drop for Stack {
             }
         }
     }
-}
-
-#[derive(Debug)]
-pub struct StackGuard {
-    stack: ManuallyDrop<Stack>,
-}
-
-impl Deref for StackGuard {
-    type Target = Stack;
-
-    fn deref(&self) -> &Self::Target {
-        &self.stack
-    }
-}
-
-impl DerefMut for StackGuard {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.stack
-    }
-}
-
-impl Drop for StackGuard {
-    fn drop(&mut self) {
-        STACK.set(Some(unsafe { ManuallyDrop::take(&mut self.stack) }));
-    }
-}
-
-thread_local! {
-    static STACK: Cell<Option<Stack>> = Cell::new(Some(Stack::new(8 * 1024 * 1024)));
 }
 
 pub(crate) fn padded_size_of<T>() -> usize {

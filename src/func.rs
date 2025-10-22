@@ -6,7 +6,7 @@ use {
         exec,
         instance::Instance,
         into_func::IntoFunc,
-        stack::StackGuard,
+        stack::Stack,
         store::{Handle, InternedFuncType, Store, StoreId, UnguardedHandle},
         val::{Val, ValType},
     },
@@ -41,7 +41,8 @@ impl Func {
     /// - If the argument count does not match the expected parameter count.
     /// - If the actual result count does not match the expected result count.
     /// - If the argument types do not match the expected parameter types.
-    pub fn call(self, store: &mut Store, args: &[Val], results: &mut [Val]) -> Result<(), Error> {
+    pub fn call(self, mut context: impl Context, args: &[Val], results: &mut [Val]) -> Result<(), Error> {
+        let (store, stack) = context.into_parts();
         let type_ = self.type_(store);
         if args.len() != type_.params().len() {
             return Err(FuncError::ParamCountMismatch)?;
@@ -54,7 +55,12 @@ impl Func {
                 return Err(FuncError::ParamTypeMismatch)?;
             }
         }
-        exec::exec(store, self, args, results)
+        if let Some(stack) = stack {
+            exec::exec(store, stack, self, args, results)
+        } else {
+            let mut stack = Stack::new(8 * 1024 * 1024);
+            exec::exec(store, &mut stack, self, args, results)
+        }
     }
 
     /// Creates a new Wasm function from its raw parts.
@@ -103,6 +109,25 @@ impl Func {
             unreachable!();
         };
         *func.code_mut() = FuncBody::Compiled(code);
+    }
+}
+
+pub trait Context {
+    fn into_parts(&mut self) -> (&mut Store, Option<&mut Stack>);
+}
+
+impl<T> Context for &mut T
+where 
+    T: Context
+{
+    fn into_parts(&mut self) -> (&mut Store, Option<&mut Stack>) {
+        (*self).into_parts()
+    }
+}
+
+impl Context for &mut Store {
+    fn into_parts(&mut self) -> (&mut Store, Option<&mut Stack>) {
+        (self, None)
     }
 }
 
@@ -333,20 +358,20 @@ impl HostFuncEntity {
 
 #[derive(Clone)]
 pub struct HostFuncTrampoline {
-    inner: Arc<dyn Fn(&mut Store, StackGuard) -> Result<StackGuard, Error> + Send + Sync + 'static>,
+    inner: Arc<dyn Fn(Caller) -> Result<(), Error> + Send + Sync + 'static>,
 }
 
 impl HostFuncTrampoline {
     pub fn new(
-        inner: impl Fn(&mut Store, StackGuard) -> Result<StackGuard, Error> + Send + Sync + 'static,
+        inner: impl Fn(Caller) -> Result<(), Error> + Send + Sync + 'static,
     ) -> Self {
         Self {
             inner: Arc::new(inner),
         }
     }
 
-    pub(crate) fn call(&self, store: &mut Store, stack: StackGuard) -> Result<StackGuard, Error> {
-        (self.inner)(store, stack)
+    pub(crate) fn call(&self, caller: Caller) -> Result<(), Error> {
+        (self.inner)(caller)
     }
 }
 
@@ -354,4 +379,10 @@ impl fmt::Debug for HostFuncTrampoline {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("HostFuncTrampoline").finish()
     }
+}
+
+#[derive(Debug)]
+pub struct Caller<'a> {
+    pub(crate) store: &'a mut Store,
+    pub(crate) stack: &'a mut Stack,
 }
