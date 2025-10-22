@@ -168,13 +168,12 @@ pub(crate) fn exec(
     let type_ = func.type_(store).clone();
 
     // Check that the stack has enough space.
-    let stack_height = unsafe { stack.ptr().offset_from(stack.base_ptr()) as usize };
-    if call_frame_size(&type_) / 8 > Stack::SIZE - stack_height {
+    if call_frame_size(&type_) > stack.capacity() - stack.len() {
         return Err(Trap::StackOverflow)?;
     }
 
     // Copy the arguments to the stack.
-    let mut ptr = stack.ptr();
+    let mut ptr = unsafe { stack.as_mut_ptr().add(stack.len()) };
     for arg in args.iter().copied() {
         unsafe {
             arg.to_unguarded(store.id()).write_to_ptr(ptr);
@@ -186,7 +185,7 @@ pub(crate) fn exec(
     func.compile(store);
 
     // Store the start of the call frame so we can reset the stack to it later.
-    let ptr = stack.ptr();
+    let ptr = unsafe { stack.as_mut_ptr().add(stack.len()) };
 
     match func.0.as_mut(store) {
         FuncEntity::Wasm(func) => {
@@ -206,7 +205,7 @@ pub(crate) fn exec(
             // Create an execution context.
             let mut context = Context {
                 ip: trampoline.as_mut_ptr() as *mut u8,
-                sp: stack.ptr() as Sp,
+                sp: unsafe { stack.as_mut_ptr().add(stack.len()) },
                 md: ptr::null_mut(),
                 ms: 0,
                 ia: 0,
@@ -238,7 +237,8 @@ pub(crate) fn exec(
                         stack = context.stack.take().unwrap();
 
                         // Reset the stack to the start of the call frame.
-                        unsafe { stack.set_ptr(ptr) };
+                        let stack_height = unsafe { ptr.offset_from(stack.as_ptr()) as usize };
+                        unsafe { stack.set_len(stack_height) };
 
                         break;
                     }
@@ -246,7 +246,8 @@ pub(crate) fn exec(
                         stack = context.stack.take().unwrap();
 
                         // Reset the stack to the start of the call frame.
-                        unsafe { stack.set_ptr(ptr) };
+                        let stack_height = unsafe { ptr.offset_from(stack.as_ptr()) as usize };
+                        unsafe { stack.set_len(stack_height) };
 
                         return Err(trap)?;
                     }
@@ -254,7 +255,8 @@ pub(crate) fn exec(
                         stack = context.stack.take().unwrap();
 
                         // Reset the stack to the start of the call frame.
-                        unsafe { stack.set_ptr(ptr) };
+                        let stack_height = unsafe { ptr.offset_from(stack.as_ptr()) as usize };
+                        unsafe { stack.set_len(stack_height) };
 
                         return Err(context.error.take().unwrap());
                     }
@@ -263,18 +265,20 @@ pub(crate) fn exec(
         }
         FuncEntity::Host(func) => {
             // Set the stack pointer to the end of the call frame.
-            unsafe { stack.set_ptr(ptr.add(call_frame_size(&type_))) };
+            let stack_height = unsafe { ptr.add(call_frame_size(&type_)).offset_from(stack.as_ptr()) as usize };
+            unsafe { stack.set_len(stack_height) };
 
             // Call the [`HostTrampoline`] of the [`HostFuncEntity`].
             stack = func.trampoline().clone().call(store, stack)?;
 
             // Reset the stack to the start of the call frame.
-            unsafe { stack.set_ptr(ptr) };
+            let stack_height = unsafe { ptr.offset_from(stack.as_ptr()) as usize };
+            unsafe { stack.set_len(stack_height) };
         }
     }
 
     // Copy the results from the stack.
-    let mut ptr = stack.ptr();
+    let mut ptr = unsafe { stack.as_mut_ptr().add(stack.len()) };
     for result in results.iter_mut() {
         unsafe {
             *result = Val::from_unguarded(
@@ -544,7 +548,8 @@ pub(crate) unsafe extern "C" fn call_host(
         let mem: Option<UnguardedMem> = args.read_imm();
 
         let mut stack = (*args.cx).stack.take().unwrap_unchecked();
-        stack.set_ptr(args.sp.offset(offset as isize).cast());
+        let stack_height = args.sp.offset(offset as isize).offset_from(stack.as_ptr()) as usize;
+        stack.set_len(stack_height);
         let FuncEntity::Host(func) = func.as_ref() else {
             hint::unreachable_unchecked();
         };
@@ -637,7 +642,8 @@ pub(crate) unsafe extern "C" fn call_indirect(
             }
             FuncEntity::Host(func) => {
                 let mut stack = (*args.cx).stack.take().unwrap_unchecked();
-                stack.set_ptr(args.sp.offset(stack_offset as isize).cast());
+                let stack_height = args.sp.offset(stack_offset as isize).offset_from(stack.as_ptr()) as usize;
+                stack.set_len(stack_height);
                 let stack = match func.trampoline().clone().call((*args.cx).store, stack) {
                     Ok(stack) => stack,
                     Err(error) => {
@@ -1137,10 +1143,12 @@ where
         let mut mem: UnguardedMem = args.read_imm();
 
         // Perform operation
-        (*args.cx).stack.as_mut().unwrap_unchecked().set_ptr(args.sp);
+        let stack = (*args.cx).stack.as_mut().unwrap_unchecked();
+        let stack_height = args.sp.offset_from(stack.as_ptr()) as usize;
+        stack.set_len(stack_height);
         let old_size = mem
             .as_mut()
-            .grow_with_stack(count, (*cx).stack.as_mut().unwrap_unchecked())
+            .grow_with_stack(count, stack)
             .unwrap_or(u32::MAX);
         let bytes = mem.as_mut().bytes_mut();
         args.md = bytes.as_mut_ptr();
@@ -1390,8 +1398,9 @@ pub(crate) unsafe extern "C" fn enter(
         };
 
         // Check that the stack has enough space.
-        let stack_height = (args.sp).offset_from((*args.cx).stack.as_mut().unwrap_unchecked().base_ptr()) as usize;
-        if code.max_stack_height > Stack::SIZE - stack_height {
+        let stack = (*args.cx).stack.as_mut().unwrap_unchecked();
+        let stack_height = (args.sp).offset_from(stack.as_mut_ptr()) as usize;
+        if code.max_stack_height > stack.capacity() - stack_height {
             return ControlFlow::Trap(Trap::StackOverflow).to_bits();
         }
 

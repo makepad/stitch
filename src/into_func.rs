@@ -81,14 +81,14 @@ macro_rules! impl_into_fund {
                     type_,
                     HostFuncTrampoline::new(move |store, mut stack| -> Result<StackGuard, Error> {
                         let ($($Ti,)*) = unsafe {
-                            let mut ptr = stack.ptr().cast::<u8>().offset(-(call_frame_size as isize));
+                            let mut ptr = stack.as_mut_ptr().add(stack.len() - call_frame_size);
                             Self::Params::read_from_stack(&mut ptr, store.id())
                         };
                         drop(stack);
                         let results = self(store, $($Ti,)*).into_result()?;
                         let mut stack = Stack::lock();
                         unsafe {
-                            let mut ptr = stack.ptr().cast::<u8>().offset(-(call_frame_size as isize));
+                            let mut ptr = stack.as_mut_ptr().add(stack.len() - call_frame_size);
                             results.write_to_stack(&mut ptr, store.id())
                         }
                         Ok(stack)

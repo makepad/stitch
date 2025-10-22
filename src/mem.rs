@@ -214,9 +214,9 @@ impl MemEntity {
         // the old data and size of this [`Memory`]. To fix this, we need to iterate over the call
         // frames on the stack, and update the value of the `md` and `ms` register to store
         // a pointer to the new data and size of this [`Memory`] instead.
-        let mut ptr = stack.ptr();
-        while ptr != stack.base_ptr() {
-            let saved_regs: &mut SavedRegs = &mut *ptr.cast::<u8>().offset(-(size_of::<SavedRegs>() as isize)).cast();
+        let mut ptr = stack.as_mut_ptr().add(stack.len());
+        while ptr != stack.as_mut_ptr() {
+            let saved_regs: &mut SavedRegs = &mut *ptr.offset(-(size_of::<SavedRegs>() as isize)).cast();
             ptr = saved_regs.sp;
             if saved_regs.md == old_data {
                 saved_regs.md = new_data;
