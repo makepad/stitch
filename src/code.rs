@@ -74,7 +74,7 @@ impl CodeBuilder {
 
     #[cold]
     fn reserve_cold(&mut self, additional: usize) {
-        let new_capacity = self.capacity.checked_add(additional).unwrap();
+        let new_capacity = self.len.checked_add(additional).unwrap();
         let new_capacity = new_capacity.max(self.capacity * 2);
         let new_capacity = new_capacity.max(8);
         let new_layout = Layout::from_size_align(new_capacity, ALIGN).unwrap();
@@ -166,6 +166,6 @@ impl Drop for CodeBuilder {
 
 impl fmt::Debug for CodeBuilder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("CodeEmitter").finish_non_exhaustive()
+        f.debug_struct("CodeBuilder").finish_non_exhaustive()
     }
 }
