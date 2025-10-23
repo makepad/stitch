@@ -3,6 +3,7 @@ use {
         decode::{Decode, DecodeError, Decoder},
         extern_ref::{ExternRef, UnguardedExternRef},
         func_ref::{FuncRef, UnguardedFuncRef},
+        guarded::Guarded,
         ref_::{Ref, RefType, UnguardedRef},
         stack::padded_size_of,
         store::StoreGuard,
@@ -137,36 +138,31 @@ impl Val {
             _ => None,
         }
     }
+}
 
-    /// Converts the given [`UnguardedVal`] to a [`Val`].
-    ///
-    /// # Safety
-    ///
-    /// The [`UnguardedVal`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(val: UnguardedVal, store_id: StoreGuard) -> Self {
-        match val {
-            UnguardedVal::I32(val) => val.into(),
-            UnguardedVal::I64(val) => val.into(),
-            UnguardedVal::F32(val) => val.into(),
-            UnguardedVal::F64(val) => val.into(),
-            UnguardedVal::FuncRef(val) => FuncRef::from_unguarded(val, store_id).into(),
-            UnguardedVal::ExternRef(val) => ExternRef::from_unguarded(val, store_id).into(),
+impl Guarded for Val {
+    type Unguarded = UnguardedVal;
+    type Guard = StoreGuard;
+    
+    unsafe fn from_unguarded(unguarded: Self::Unguarded, guard: Self::Guard) -> Self {
+        match unguarded {
+            UnguardedVal::I32(unguarded) => unguarded.into(),
+            UnguardedVal::I64(unguarded) => unguarded.into(),
+            UnguardedVal::F32(unguarded) => unguarded.into(),
+            UnguardedVal::F64(unguarded) => unguarded.into(),
+            UnguardedVal::FuncRef(unguarded) => FuncRef::from_unguarded(unguarded, guard).into(),
+            UnguardedVal::ExternRef(unguarded) => ExternRef::from_unguarded(unguarded, guard).into(),
         }
     }
 
-    /// Converts this [`Val`] to an [`UnguardedVal`].
-    ///
-    /// # Panics
-    ///
-    /// This [`Val`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedVal {
+    fn to_unguarded(self, guard: Self::Guard) -> Self::Unguarded {
         match self {
-            Val::I32(val) => val.into(),
-            Val::I64(val) => val.into(),
-            Val::F32(val) => val.into(),
-            Val::F64(val) => val.into(),
-            Val::FuncRef(val) => val.to_unguarded(store_id).into(),
-            Val::ExternRef(val) => val.to_unguarded(store_id).into(),
+            Val::I32(guarded) => guarded.into(),
+            Val::I64(guarded) => guarded.into(),
+            Val::F32(guarded) => guarded.into(),
+            Val::F64(guarded) => guarded.into(),
+            Val::FuncRef(guarded) => guarded.to_unguarded(guard).into(),
+            Val::ExternRef(guarded) => guarded.to_unguarded(guard).into(),
         }
     }
 }

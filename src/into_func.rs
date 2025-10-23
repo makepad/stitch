@@ -4,6 +4,7 @@ use crate::{
     extern_ref::{ExternRef, UnguardedExternRef},
     func::{Caller, FuncType, HostFuncTrampoline},
     func_ref::{FuncRef, UnguardedFuncRef},
+    guarded::Guarded,
     stack::padded_size_of,
     store::{Store, StoreGuard},
     val::ValType,

@@ -2,6 +2,7 @@ use crate::{
     decode::{Decode, DecodeError, Decoder},
     extern_ref::{ExternRef, UnguardedExternRef},
     func_ref::{FuncRef, UnguardedFuncRef},
+    guarded::Guarded,
     store::StoreGuard,
 };
 
@@ -54,28 +55,23 @@ impl Ref {
             _ => None,
         }
     }
+}
 
-    /// Converts the given [`UnguardedRef`] to a [`Ref`].
-    ///
-    /// # Safety
-    ///
-    /// The [`UnguardedRef`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(val: UnguardedRef, store_id: StoreGuard) -> Self {
-        match val {
-            UnguardedRef::FuncRef(val) => FuncRef::from_unguarded(val, store_id).into(),
-            UnguardedRef::ExternRef(val) => ExternRef::from_unguarded(val, store_id).into(),
+impl Guarded for Ref {
+    type Unguarded = UnguardedRef;
+    type Guard = StoreGuard;
+
+    unsafe fn from_unguarded(unguarded: Self::Unguarded, guard: Self::Guard) -> Self {
+        match unguarded {
+            UnguardedRef::FuncRef(unguarded) => FuncRef::from_unguarded(unguarded, guard).into(),
+            UnguardedRef::ExternRef(unguarded) => ExternRef::from_unguarded(unguarded, guard).into(),
         }
     }
 
-    /// Converts this [`Ref`] to an [`UnguardedRef`].
-    ///
-    /// # Panics
-    ///
-    /// This [`Ref`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedRef {
+    fn to_unguarded(self, guard: Self::Guard) -> Self::Unguarded {
         match self {
-            Ref::FuncRef(val) => val.to_unguarded(store_id).into(),
-            Ref::ExternRef(val) => val.to_unguarded(store_id).into(),
+            Ref::FuncRef(guarded) => guarded.to_unguarded(guard).into(),
+            Ref::ExternRef(guarded) => guarded.to_unguarded(guard).into(),
         }
     }
 }

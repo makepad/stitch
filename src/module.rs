@@ -10,6 +10,7 @@ use {
         extern_val::{ExternType, ExternTypeDesc, ExternVal, ExternValDesc},
         func::{UncompiledFuncBody, Func, FuncType},
         global::{Global, GlobalType},
+        guarded::Guarded,
         instance::{Instance, InstanceIniter},
         linker::{InstantiateError, Linker},
         mem::{Mem, MemType},
