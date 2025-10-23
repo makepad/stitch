@@ -1,7 +1,7 @@
 use {
     crate::{
         extern_::{Extern, UnguardedExtern},
-        store::{Store, StoreId},
+        store::{Store, StoreGuard},
     },
     std::any::Any,
 };
@@ -39,7 +39,7 @@ impl ExternRef {
     /// # Safety
     ///
     /// The given [`UnguardedExternRef`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(extern_: UnguardedExternRef, store_id: StoreId) -> Self {
+    pub(crate) unsafe fn from_unguarded(extern_: UnguardedExternRef, store_id: StoreGuard) -> Self {
         Self(extern_.map(|extern_| unsafe { Extern::from_unguarded(extern_, store_id) }))
     }
 
@@ -48,7 +48,7 @@ impl ExternRef {
     /// # Panics
     ///
     /// This [`FuncRef`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedExternRef {
+    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedExternRef {
         self.0.map(|extern_| extern_.to_unguarded(store_id))
     }
 }

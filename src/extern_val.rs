@@ -3,7 +3,7 @@ use crate::{
     func::{Func, FuncType, UnguardedFunc},
     global::{Global, GlobalType, UnguardedGlobal},
     mem::{Mem, MemType, UnguardedMem},
-    store::{Store, StoreId},
+    store::{Store, StoreGuard},
     table::{Table, TableType, UnguardedTable},
 };
 
@@ -85,7 +85,7 @@ impl ExternVal {
     ///
     /// Any [`UnguardedHandle`] in the given [`UnguardedExternVal`] must be owned by the [`Store`]
     /// with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(val: UnguardedExternVal, store_id: StoreId) -> Self {
+    pub(crate) unsafe fn from_unguarded(val: UnguardedExternVal, store_id: StoreGuard) -> Self {
         match val {
             UnguardedExternVal::Func(func) => Func::from_unguarded(func, store_id).into(),
             UnguardedExternVal::Table(table) => Table::from_unguarded(table, store_id).into(),
@@ -100,7 +100,7 @@ impl ExternVal {
     ///
     /// Panics if any [`Handle`] in this [`ExternVal`] is not owned by the [`Store`] with the given
     /// [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedExternVal {
+    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedExternVal {
         match self {
             Self::Func(func) => func.to_unguarded(store_id).into(),
             Self::Table(table) => table.to_unguarded(store_id).into(),

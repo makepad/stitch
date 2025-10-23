@@ -5,7 +5,7 @@ use {
         func_ref::{FuncRef, UnguardedFuncRef},
         ref_::{Ref, RefType, UnguardedRef},
         stack::padded_size_of,
-        store::StoreId,
+        store::StoreGuard,
     },
     std::fmt,
 };
@@ -143,7 +143,7 @@ impl Val {
     /// # Safety
     ///
     /// The [`UnguardedVal`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(val: UnguardedVal, store_id: StoreId) -> Self {
+    pub(crate) unsafe fn from_unguarded(val: UnguardedVal, store_id: StoreGuard) -> Self {
         match val {
             UnguardedVal::I32(val) => val.into(),
             UnguardedVal::I64(val) => val.into(),
@@ -159,7 +159,7 @@ impl Val {
     /// # Panics
     ///
     /// This [`Val`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedVal {
+    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedVal {
         match self {
             Val::I32(val) => val.into(),
             Val::I64(val) => val.into(),

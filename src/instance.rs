@@ -7,7 +7,7 @@ use {
         func::{Func, UnguardedFunc},
         global::{Global, UnguardedGlobal},
         mem::{Mem, UnguardedMem},
-        store::{InternedFuncType, StoreId, UnguardedInternedFuncType},
+        store::{InternedFuncType, StoreGuard, UnguardedInternedFuncType},
         table::{Table, UnguardedTable},
     },
     std::{
@@ -20,7 +20,7 @@ use {
 /// A [`Module`](`crate::Module`) instance.
 #[derive(Clone, Debug)]
 pub struct Instance {
-    store_id: StoreId,
+    store_id: StoreGuard,
     inner: Arc<OnceCell<InstanceInner>>,
 }
 
@@ -62,7 +62,7 @@ impl Instance {
     }
 
     /// Creates an uninitialized [`Instance`].
-    pub(crate) fn uninited(store_id: StoreId) -> Instance {
+    pub(crate) fn uninited(store_id: StoreGuard) -> Instance {
         Instance {
             store_id,
             inner: Arc::new(OnceCell::new()),
@@ -178,7 +178,7 @@ impl EvaluationContext for Instance {
 /// An iterator over the exports in an [`Instance`].
 #[derive(Clone, Debug)]
 pub struct InstanceExports<'a> {
-    store_id: StoreId,
+    store_id: StoreGuard,
     iter: hash_map::Iter<'a, Arc<str>, UnguardedExternVal>,
 }
 
@@ -209,7 +209,7 @@ struct InstanceInner {
 /// An initializer for an [`Instance`].
 #[derive(Debug)]
 pub(crate) struct InstanceIniter {
-    store_id: StoreId,
+    store_id: StoreGuard,
     types: Vec<UnguardedInternedFuncType>,
     funcs: Vec<UnguardedFunc>,
     tables: Vec<UnguardedTable>,
@@ -222,7 +222,7 @@ pub(crate) struct InstanceIniter {
 
 impl InstanceIniter {
     /// Creates a new [`InstanceIniter`].
-    pub(crate) fn new(store_id: StoreId) -> InstanceIniter {
+    pub(crate) fn new(store_id: StoreGuard) -> InstanceIniter {
         InstanceIniter {
             types: Vec::new(),
             funcs: Vec::new(),

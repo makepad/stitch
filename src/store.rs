@@ -7,6 +7,7 @@ use {
         extern_::ExternEntity,
         func::{FuncEntity, FuncType},
         global::GlobalEntity,
+        guarded::Guarded,
         mem::MemEntity,
         table::TableEntity,
     },
@@ -22,7 +23,7 @@ use {
 #[derive(Debug)]
 pub struct Store {
     engine: Engine,
-    id: StoreId,
+    id: StoreGuard,
     types: FuncTypeInterner,
     funcs: Vec<AliasableBox<FuncEntity>>,
     tables: Vec<AliasableBox<TableEntity>>,
@@ -35,7 +36,7 @@ pub struct Store {
 
 impl Store {
     pub fn new(engine: Engine) -> Self {
-        let id = StoreId::new();
+        let id = StoreGuard::new();
         Self {
             engine,
             id,
@@ -54,7 +55,7 @@ impl Store {
         &self.engine
     }
 
-    pub(crate) fn id(&self) -> StoreId {
+    pub(crate) fn id(&self) -> StoreGuard {
         self.id
     }
 
@@ -140,9 +141,9 @@ impl Store {
 
 /// A unique identifier for a [`Store`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct StoreId(usize);
+pub struct StoreGuard(usize);
 
-impl StoreId {
+impl StoreGuard {
     pub(crate) fn new() -> Self {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -159,18 +160,18 @@ impl StoreId {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct InternedFuncType {
     type_: UnguardedInternedFuncType,
-    store_id: StoreId,
+    store_id: StoreGuard,
 }
 
 impl InternedFuncType {
     pub(crate) unsafe fn from_unguarded(
         type_: UnguardedInternedFuncType,
-        store_id: StoreId,
+        store_id: StoreGuard,
     ) -> Self {
         Self { type_, store_id }
     }
 
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedInternedFuncType {
+    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedInternedFuncType {
         assert_eq!(store_id, self.store_id);
         self.type_
     }
@@ -181,32 +182,39 @@ pub(crate) struct UnguardedInternedFuncType(usize);
 
 pub(crate) struct Handle<T> {
     unguarded: UnguardedHandle<T>,
-    store_id: StoreId,
+    store_guard: StoreGuard,
 }
 
 impl<T> Handle<T> {
     pub(crate) fn as_ref(self, store: &Store) -> &T {
-        assert_eq!(store.id, self.store_id, "store mismatch");
+        assert_eq!(store.id, self.store_guard, "store mismatch");
         unsafe { self.unguarded.as_ref() }
     }
 
     pub(crate) fn as_mut(mut self, store: &mut Store) -> &mut T {
-        assert_eq!(store.id, self.store_id, "store mismatch");
+        assert_eq!(store.id, self.store_guard, "store mismatch");
         unsafe { self.unguarded.as_mut() }
     }
+}
 
-    pub(crate) unsafe fn from_unguarded(unguarded: UnguardedHandle<T>, store_id: StoreId) -> Self {
+impl<T> Guarded for Handle<T> {
+    type Unguarded = UnguardedHandle<T>;
+    type Guard = StoreGuard;
+
+    unsafe fn from_unguarded(unguarded: UnguardedHandle<T>, store_id: StoreGuard) -> Self {
         Self {
             unguarded,
-            store_id,
+            store_guard: store_id,
         }
     }
 
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedHandle<T> {
-        assert_eq!(store_id, self.store_id);
+    fn to_unguarded(self, store_id: StoreGuard) -> UnguardedHandle<T> {
+        assert_eq!(store_id, self.store_guard);
         self.unguarded
     }
 }
+
+impl<T> Copy for Handle<T> {}
 
 impl<T> Clone for Handle<T> {
     fn clone(&self) -> Self {
@@ -214,18 +222,19 @@ impl<T> Clone for Handle<T> {
     }
 }
 
-impl<T> Copy for Handle<T> {}
+impl<T> Eq for Handle<T> {}
 
-impl<T> fmt::Debug for Handle<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("Handle")
-            .field("handle", &self.unguarded)
-            .field("store_id", &self.store_id)
-            .finish()
+impl<T> PartialEq for Handle<T> {
+    fn eq(&self, other: &Self) -> bool {
+        if self.unguarded != other.unguarded {
+            return false;
+        }
+        if self.store_guard != other.store_guard {
+            return false;
+        }
+        true
     }
 }
-
-impl<T> Eq for Handle<T> {}
 
 impl<T> Hash for Handle<T> {
     fn hash<H>(&self, state: &mut H)
@@ -233,19 +242,16 @@ impl<T> Hash for Handle<T> {
         H: Hasher,
     {
         self.unguarded.hash(state);
-        self.store_id.hash(state);
+        self.store_guard.hash(state);
     }
 }
 
-impl<T> PartialEq for Handle<T> {
-    fn eq(&self, other: &Self) -> bool {
-        if self.unguarded != other.unguarded {
-            return false;
-        }
-        if self.store_id != other.store_id {
-            return false;
-        }
-        true
+impl<T> fmt::Debug for Handle<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Handle")
+            .field("unguarded", &self.unguarded)
+            .field("guard", &self.store_guard)
+            .finish()
     }
 }
 
@@ -256,8 +262,8 @@ pub(crate) struct HandlePair<T, U>(pub(crate) Handle<T>, pub(crate) Handle<U>);
 
 impl<T, U> HandlePair<T, U> {
     pub(crate) fn as_mut_pair(mut self, store: &Store) -> (&mut T, &mut U) {
-        assert_eq!(store.id(), self.0.store_id, "store mismatch");
-        assert_eq!(store.id(), self.1.store_id, "store mismatch");
+        assert_eq!(store.id(), self.0.store_guard, "store mismatch");
+        assert_eq!(store.id(), self.1.store_guard, "store mismatch");
         assert_ne!(
             self.0.unguarded.as_ptr() as usize,
             self.1.unguarded.as_ptr() as usize,
@@ -269,13 +275,13 @@ impl<T, U> HandlePair<T, U> {
 
 #[derive(Debug)]
 struct FuncTypeInterner {
-    store_id: StoreId,
+    store_id: StoreGuard,
     types: Vec<FuncType>,
     interned_types: HashMap<FuncType, UnguardedInternedFuncType>,
 }
 
 impl FuncTypeInterner {
-    fn new(store_id: StoreId) -> Self {
+    fn new(store_id: StoreGuard) -> Self {
         Self {
             store_id,
             types: Vec::new(),

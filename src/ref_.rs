@@ -2,7 +2,7 @@ use crate::{
     decode::{Decode, DecodeError, Decoder},
     extern_ref::{ExternRef, UnguardedExternRef},
     func_ref::{FuncRef, UnguardedFuncRef},
-    store::StoreId,
+    store::StoreGuard,
 };
 
 /// A Wasm reference.
@@ -60,7 +60,7 @@ impl Ref {
     /// # Safety
     ///
     /// The [`UnguardedRef`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(val: UnguardedRef, store_id: StoreId) -> Self {
+    pub(crate) unsafe fn from_unguarded(val: UnguardedRef, store_id: StoreGuard) -> Self {
         match val {
             UnguardedRef::FuncRef(val) => FuncRef::from_unguarded(val, store_id).into(),
             UnguardedRef::ExternRef(val) => ExternRef::from_unguarded(val, store_id).into(),
@@ -72,7 +72,7 @@ impl Ref {
     /// # Panics
     ///
     /// This [`Ref`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedRef {
+    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedRef {
         match self {
             Ref::FuncRef(val) => val.to_unguarded(store_id).into(),
             Ref::ExternRef(val) => val.to_unguarded(store_id).into(),

@@ -4,7 +4,8 @@ use {
         downcast::{DowncastMut, DowncastRef},
         extern_ref::UnguardedExternRef,
         func_ref::UnguardedFuncRef,
-        store::{Handle, Store, StoreId, UnguardedHandle},
+        guarded::Guarded,
+        store::{Handle, Store, StoreGuard, UnguardedHandle},
         val::{UnguardedVal, Val, ValType},
     },
     std::{error::Error, fmt},
@@ -142,7 +143,7 @@ impl Global {
     /// # Safety
     ///
     /// The given [`UnguardedGlobal`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(global: UnguardedGlobal, store_id: StoreId) -> Self {
+    pub(crate) unsafe fn from_unguarded(global: UnguardedGlobal, store_id: StoreGuard) -> Self {
         Self(Handle::from_unguarded(global, store_id))
     }
 
@@ -151,7 +152,7 @@ impl Global {
     /// # Panics
     ///
     /// If this [`Global`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedGlobal {
+    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedGlobal {
         self.0.to_unguarded(store_id).into()
     }
 }

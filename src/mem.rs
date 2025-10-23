@@ -4,9 +4,10 @@ use {
         decode::{Decode, DecodeError, Decoder},
         exec::SavedRegs,
         func::Context,
+        guarded::Guarded,
         limits::Limits,
         stack::Stack,
-        store::{Handle, HandlePair, Store, StoreId, UnguardedHandle},
+        store::{Handle, HandlePair, Store, StoreGuard, UnguardedHandle},
         trap::Trap,
     },
     std::{error::Error, fmt},
@@ -79,7 +80,7 @@ impl Mem {
     /// # Safety
     ///
     /// The given [`UnguardedMem`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(memory: UnguardedMem, store_id: StoreId) -> Self {
+    pub(crate) unsafe fn from_unguarded(memory: UnguardedMem, store_id: StoreGuard) -> Self {
         Self(Handle::from_unguarded(memory, store_id))
     }
 
@@ -88,7 +89,7 @@ impl Mem {
     /// # Panics
     ///
     /// This [`Mem`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedMem {
+    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedMem {
         self.0.to_unguarded(store_id)
     }
 }

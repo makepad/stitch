@@ -5,9 +5,10 @@ use {
         elem::{Elem, ElemEntity, ElemEntityT},
         extern_ref::UnguardedExternRef,
         func_ref::UnguardedFuncRef,
+        guarded::Guarded,
         limits::Limits,
         ref_::{Ref, RefType, UnguardedRef},
-        store::{Handle, HandlePair, Store, StoreId, UnguardedHandle},
+        store::{Handle, HandlePair, Store, StoreGuard, UnguardedHandle},
         trap::Trap,
     },
     std::{error::Error, fmt},
@@ -179,7 +180,7 @@ impl Table {
     /// # Safety
     ///
     /// The given [`UnguardedTable`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(table: UnguardedTable, store_id: StoreId) -> Self {
+    pub(crate) unsafe fn from_unguarded(table: UnguardedTable, store_id: StoreGuard) -> Self {
         Self(Handle::from_unguarded(table, store_id))
     }
 
@@ -188,7 +189,7 @@ impl Table {
     /// # Panics
     ///
     /// This [`Table`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedTable {
+    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedTable {
         self.0.to_unguarded(store_id)
     }
 }

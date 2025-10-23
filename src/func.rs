@@ -4,10 +4,11 @@ use {
         decode::{Decode, DecodeError, Decoder},
         error::Error,
         exec,
+        guarded::Guarded,
         instance::Instance,
         into_func::IntoFunc,
         stack::Stack,
-        store::{Handle, InternedFuncType, Store, StoreId, UnguardedHandle},
+        store::{Handle, InternedFuncType, Store, StoreGuard, UnguardedHandle},
         val::{Val, ValType},
     },
     std::{error, fmt, mem, sync::Arc},
@@ -78,7 +79,7 @@ impl Func {
     /// # Safety
     ///
     /// The given [`UnguardedFunc`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(func: UnguardedFunc, store_id: StoreId) -> Self {
+    pub(crate) unsafe fn from_unguarded(func: UnguardedFunc, store_id: StoreGuard) -> Self {
         Self(Handle::from_unguarded(func, store_id))
     }
 
@@ -87,7 +88,7 @@ impl Func {
     /// # Panics
     ///
     /// This [`Func`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedFunc {
+    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedFunc {
         self.0.to_unguarded(store_id)
     }
 

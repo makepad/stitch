@@ -14,6 +14,7 @@ use {
         func::{CompiledFuncBody, Func, FuncEntity, FuncType, InstrSlot, UncompiledFuncBody},
         func_ref::{FuncRef, UnguardedFuncRef},
         global::{GlobalEntity, GlobalEntityT},
+        guarded::Guarded,
         instance::Instance,
         ops::*,
         ref_::RefType,

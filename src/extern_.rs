@@ -1,5 +1,8 @@
 use {
-    crate::store::{Handle, Store, StoreId, UnguardedHandle},
+    crate::{
+        guarded::Guarded,
+        store::{Handle, Store, StoreGuard, UnguardedHandle},
+    },
     std::any::Any,
 };
 
@@ -15,11 +18,11 @@ impl Extern {
         self.0.as_ref(store).get()
     }
 
-    pub(crate) unsafe fn from_unguarded(extern_: UnguardedExtern, store_id: StoreId) -> Self {
+    pub(crate) unsafe fn from_unguarded(extern_: UnguardedExtern, store_id: StoreGuard) -> Self {
         Self(Handle::from_unguarded(extern_, store_id))
     }
 
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedExtern {
+    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedExtern {
         self.0.to_unguarded(store_id)
     }
 }

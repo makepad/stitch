@@ -1,6 +1,7 @@
 use crate::{
     func::{Func, UnguardedFunc},
-    store::{Handle, StoreId},
+    guarded::Guarded,
+    store::{Handle, StoreGuard},
 };
 
 /// A nullable reference to a [`Func`].
@@ -33,7 +34,7 @@ impl FuncRef {
     /// # Safety
     ///
     /// The [[`UnguardedFuncRef`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(func: UnguardedFuncRef, store_id: StoreId) -> Self {
+    pub(crate) unsafe fn from_unguarded(func: UnguardedFuncRef, store_id: StoreGuard) -> Self {
         Self(func.map(|func| unsafe { Func(Handle::from_unguarded(func, store_id)) }))
     }
 
@@ -42,7 +43,7 @@ impl FuncRef {
     /// # Panics
     ///
     /// This [`FuncRef`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedFuncRef {
+    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedFuncRef {
         self.0.map(|func| func.0.to_unguarded(store_id))
     }
 }

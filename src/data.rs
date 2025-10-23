@@ -1,5 +1,8 @@
 use {
-    crate::store::{Handle, Store, StoreId, UnguardedHandle},
+    crate::{
+        guarded::Guarded,
+        store::{Handle, Store, StoreGuard, UnguardedHandle},
+    },
     std::sync::Arc,
 };
 
@@ -17,11 +20,11 @@ impl Data {
         self.0.as_mut(store).drop_bytes();
     }
 
-    pub(crate) unsafe fn from_unguarded(data: UnguardedData, store_id: StoreId) -> Self {
+    pub(crate) unsafe fn from_unguarded(data: UnguardedData, store_id: StoreGuard) -> Self {
         Self(Handle::from_unguarded(data, store_id))
     }
 
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedData {
+    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedData {
         self.0.to_unguarded(store_id)
     }
 }

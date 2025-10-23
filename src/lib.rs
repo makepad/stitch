@@ -18,6 +18,7 @@ mod extern_val;
 mod func;
 mod func_ref;
 mod global;
+mod guarded;
 mod instance;
 mod into_func;
 mod limits;

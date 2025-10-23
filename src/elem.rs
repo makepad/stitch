@@ -2,8 +2,9 @@ use crate::{
     downcast::{DowncastMut, DowncastRef},
     extern_ref::UnguardedExternRef,
     func_ref::UnguardedFuncRef,
+    guarded::Guarded,
     ref_::RefType,
-    store::{Handle, Store, StoreId, UnguardedHandle},
+    store::{Handle, Store, StoreGuard, UnguardedHandle},
 };
 
 /// A Wasm element segment.
@@ -37,11 +38,11 @@ impl Elem {
         }
     }
 
-    pub(crate) unsafe fn from_unguarded(elem: UnguardedElem, store_id: StoreId) -> Self {
+    pub(crate) unsafe fn from_unguarded(elem: UnguardedElem, store_id: StoreGuard) -> Self {
         Self(Handle::from_unguarded(elem, store_id))
     }
 
-    pub(crate) fn to_unguarded(self, store_id: StoreId) -> UnguardedElem {
+    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedElem {
         self.0.to_unguarded(store_id).into()
     }
 }

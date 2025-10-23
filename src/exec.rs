@@ -13,6 +13,7 @@ use {
         func::{Caller, Func, FuncBody, FuncEntity, FuncType, InstrSlot, UnguardedFunc},
         func_ref::UnguardedFuncRef,
         global::{GlobalEntity, GlobalEntityT, UnguardedGlobal},
+        guarded::Guarded,
         mem::UnguardedMem,
         ops::*,
         stack,
