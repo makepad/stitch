@@ -74,24 +74,6 @@ impl Func {
         Self(store.insert_func(FuncEntity::Wasm(WasmFuncEntity::new(type_, instance, code))))
     }
 
-    /// Converts the given [`UnguardedFunc`] to a [`Func`].
-    ///
-    /// # Safety
-    ///
-    /// The given [`UnguardedFunc`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(func: UnguardedFunc, store_id: StoreGuard) -> Self {
-        Self(Handle::from_unguarded(func, store_id))
-    }
-
-    /// Converts this [`Func`] to an [`UnguardedFunc`].
-    ///
-    /// # Panics
-    ///
-    /// This [`Func`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedFunc {
-        self.0.to_unguarded(store_id)
-    }
-
     /// Ensures that this [`Func`] is compiled, if it is a Wasm function.
     pub(crate) fn compile(self, store: &mut Store) {
         let FuncEntity::Wasm(func) = self.0.as_mut(store) else {
@@ -110,6 +92,19 @@ impl Func {
             unreachable!();
         };
         *func.code_mut() = FuncBody::Compiled(code);
+    }
+}
+
+impl Guarded for Func {
+    type Unguarded = UnguardedFunc;
+    type Guard = StoreGuard;
+
+    unsafe fn from_unguarded(unguarded: UnguardedFunc, guard: Self::Guard) -> Self {
+        Self(Handle::from_unguarded(unguarded, guard))
+    }
+
+    fn to_unguarded(self, guard: Self::Guard) -> UnguardedFunc {
+        self.0.to_unguarded(guard)
     }
 }
 

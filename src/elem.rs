@@ -37,13 +37,18 @@ impl Elem {
             ElemEntity::ExternRef(elem) => elem.drop_elems(),
         }
     }
+}
 
-    pub(crate) unsafe fn from_unguarded(elem: UnguardedElem, store_id: StoreGuard) -> Self {
-        Self(Handle::from_unguarded(elem, store_id))
+impl Guarded for Elem {
+    type Unguarded = UnguardedElem;
+    type Guard = StoreGuard;
+
+    unsafe fn from_unguarded(unguarded: Self::Unguarded, guard: Self::Guard) -> Self {
+        Self(Handle::from_unguarded(unguarded, guard))
     }
 
-    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedElem {
-        self.0.to_unguarded(store_id).into()
+    fn to_unguarded(self, guard: Self::Guard) -> UnguardedElem {
+        self.0.to_unguarded(guard).into()
     }
 }
 

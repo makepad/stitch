@@ -137,23 +137,18 @@ impl Global {
             _ => Err(GlobalError::ValTypeMismatch),
         }
     }
+}
 
-    /// Converts the given [`UnguardedGlobal`] to a [`Global`].
-    ///
-    /// # Safety
-    ///
-    /// The given [`UnguardedGlobal`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(global: UnguardedGlobal, store_id: StoreGuard) -> Self {
-        Self(Handle::from_unguarded(global, store_id))
+impl Guarded for Global {
+    type Unguarded = UnguardedGlobal;
+    type Guard = StoreGuard;
+
+    unsafe fn from_unguarded(global: UnguardedGlobal, guard: Self::Guard) -> Self {
+        Self(Handle::from_unguarded(global, guard))
     }
 
-    /// Converts this [`Global`] to an [`UnguardedGlobal`].
-    ///
-    /// # Panics
-    ///
-    /// If this [`Global`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedGlobal {
-        self.0.to_unguarded(store_id).into()
+    fn to_unguarded(self, guard: Self::Guard) -> UnguardedGlobal {
+        self.0.to_unguarded(guard).into()
     }
 }
 

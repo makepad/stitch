@@ -174,23 +174,18 @@ impl Table {
             _ => panic!(),
         }
     }
+}
 
-    /// Converts the given [`UnguardedTable`] to a [`Table`].
-    ///
-    /// # Safety
-    ///
-    /// The given [`UnguardedTable`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(table: UnguardedTable, store_id: StoreGuard) -> Self {
-        Self(Handle::from_unguarded(table, store_id))
+impl Guarded for Table {
+    type Unguarded = UnguardedTable;
+    type Guard = StoreGuard;
+
+    unsafe fn from_unguarded(unguarded: UnguardedTable, guard: Self::Guard) -> Self {
+        Self(Handle::from_unguarded(unguarded, guard))
     }
 
-    /// Converts this [`Table`] to an [`UnguardedTable`].
-    ///
-    /// # Panics
-    ///
-    /// This [`Table`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedTable {
-        self.0.to_unguarded(store_id)
+    fn to_unguarded(self, guard: Self::Guard) -> Self::Unguarded {
+        self.0.to_unguarded(guard)
     }
 }
 

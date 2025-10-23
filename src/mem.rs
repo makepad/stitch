@@ -74,23 +74,18 @@ impl Mem {
         let (dst_table, src_data) = HandlePair(self.0, src_data.0).as_mut_pair(store);
         dst_table.init(dst_offset, src_data, src_offset, count)
     }
+}
 
-    /// Converts the given [`UnguardedMem`] to a [`Mem`].
-    ///
-    /// # Safety
-    ///
-    /// The given [`UnguardedMem`] must be owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) unsafe fn from_unguarded(memory: UnguardedMem, store_id: StoreGuard) -> Self {
-        Self(Handle::from_unguarded(memory, store_id))
+impl Guarded for Mem {
+    type Unguarded = UnguardedMem;
+    type Guard = StoreGuard;
+
+    unsafe fn from_unguarded(memory: UnguardedMem, guard: Self::Guard) -> Self {
+        Self(Handle::from_unguarded(memory, guard))
     }
 
-    /// Converts this [`Mem`] to an [`UnguardedMem`].
-    ///
-    /// # Panics
-    ///
-    /// This [`Mem`] is not owned by the [`Store`] with the given [`StoreId`].
-    pub(crate) fn to_unguarded(self, store_id: StoreGuard) -> UnguardedMem {
-        self.0.to_unguarded(store_id)
+    fn to_unguarded(self, guard: Self::Guard) -> Self::Unguarded {
+        self.0.to_unguarded(guard)
     }
 }
 

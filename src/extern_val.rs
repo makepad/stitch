@@ -2,6 +2,7 @@ use crate::{
     decode::{Decode, DecodeError, Decoder},
     func::{Func, FuncType, UnguardedFunc},
     global::{Global, GlobalType, UnguardedGlobal},
+    guarded::Guarded,
     mem::{Mem, MemType, UnguardedMem},
     store::{Store, StoreGuard},
     table::{Table, TableType, UnguardedTable},

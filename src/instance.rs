@@ -6,6 +6,7 @@ use {
         extern_val::{ExternVal, UnguardedExternVal},
         func::{Func, UnguardedFunc},
         global::{Global, UnguardedGlobal},
+        guarded::Guarded,
         mem::{Mem, UnguardedMem},
         store::{InternedFuncType, StoreGuard, UnguardedInternedFuncType},
         table::{Table, UnguardedTable},
