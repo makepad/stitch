@@ -5,7 +5,7 @@ use {
 
 pub(crate) trait Guarded: Copy {
     type Unguarded: Copy;
-    type Guard: Copy;
+    type Guard: Copy + Eq;
 
     unsafe fn from_unguarded(unguarded: Self::Unguarded, guard: Self::Guard) -> Self;
 
@@ -108,6 +108,31 @@ where
         let slice = self.as_unguarded_slice_mut();
         let range = slice::try_range(range, ..slice.len())?;
         Some(&mut slice[range])
+    }
+
+    fn fill(self, guarded: T) {
+        let unguarded = guarded.to_unguarded(self.guard());
+        unsafe { self.fill_unguarded(unguarded) }
+    }
+
+    unsafe fn fill_unguarded(self, unguarded: T::Unguarded) {
+        self.as_unguarded_slice_mut().fill(unguarded)
+    }
+
+    fn copy_from_slice(self, src: GuardedSliceRef<'a, T>) {
+        assert!(src.guard() == self.guard());
+        unsafe { self.copy_from_slice_unguarded(src.as_unguarded_slice()) }
+    }
+
+    unsafe fn copy_from_slice_unguarded(self, src: &[T::Unguarded]) {
+        self.as_unguarded_slice_mut().copy_from_slice(src);
+    }
+
+    fn copy_within<R>(self, src: R, dest: usize)
+    where
+        R: RangeBounds<usize>
+    {
+        self.as_unguarded_slice_mut().copy_within(src, dest)
     }
 }
 

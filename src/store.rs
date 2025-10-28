@@ -23,7 +23,7 @@ use {
 #[derive(Debug)]
 pub struct Store {
     engine: Engine,
-    id: StoreGuard,
+    guard: StoreGuard,
     types: FuncTypeInterner,
     funcs: Vec<AliasableBox<FuncEntity>>,
     tables: Vec<AliasableBox<TableEntity>>,
@@ -36,11 +36,11 @@ pub struct Store {
 
 impl Store {
     pub fn new(engine: Engine) -> Self {
-        let id = StoreGuard::new();
+        let guard = StoreGuard::new();
         Self {
             engine,
-            id,
-            types: FuncTypeInterner::new(id),
+            guard,
+            types: FuncTypeInterner::new(guard),
             funcs: Vec::new(),
             tables: Vec::new(),
             mems: Vec::new(),
@@ -55,8 +55,8 @@ impl Store {
         &self.engine
     }
 
-    pub(crate) fn id(&self) -> StoreGuard {
-        self.id
+    pub(crate) fn guard(&self) -> StoreGuard {
+        self.guard
     }
 
     pub(crate) fn resolve_type(&self, type_: InternedFuncType) -> &FuncType {
@@ -72,7 +72,7 @@ impl Store {
     /// Returns a [`Handle`] to the inserted [`FuncEntity`].
     pub(crate) fn insert_func(&mut self, func: FuncEntity) -> Handle<FuncEntity> {
         let func = AliasableBox::from_box(Box::new(func));
-        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&func), self.id) };
+        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&func), self.guard) };
         self.funcs.push(func);
         handle
     }
@@ -82,7 +82,7 @@ impl Store {
     /// Returns a [`Handle`] to the inserted [`TableEntity`].
     pub(crate) fn insert_table(&mut self, table: TableEntity) -> Handle<TableEntity> {
         let table = AliasableBox::from_box(Box::new(table));
-        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&table), self.id) };
+        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&table), self.guard) };
         self.tables.push(table);
         handle
     }
@@ -92,7 +92,7 @@ impl Store {
     /// Returns a [`Handle`] to the inserted [`MemEntity`].
     pub(crate) fn insert_mem(&mut self, mem: MemEntity) -> Handle<MemEntity> {
         let mem = AliasableBox::from_box(Box::new(mem));
-        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&mem), self.id) };
+        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&mem), self.guard) };
         self.mems.push(mem);
         handle
     }
@@ -102,7 +102,7 @@ impl Store {
     /// Returns a [`Handle`] to the inserted [`GlobalEntity`].
     pub(crate) fn insert_global(&mut self, global: GlobalEntity) -> Handle<GlobalEntity> {
         let global = AliasableBox::from_box(Box::new(global));
-        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&global), self.id) };
+        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&global), self.guard) };
         self.globals.push(global);
         handle
     }
@@ -112,7 +112,7 @@ impl Store {
     /// Returns a [`Handle`] to the inserted [`ElemEntity`].
     pub(crate) fn insert_elem(&mut self, elem: ElemEntity) -> Handle<ElemEntity> {
         let elem = AliasableBox::from_box(Box::new(elem));
-        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&elem), self.id) };
+        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&elem), self.guard) };
         self.elems.push(elem);
         handle
     }
@@ -122,7 +122,7 @@ impl Store {
     /// Returns a [`Handle`] to the inserted [`DataEntity`].
     pub(crate) fn insert_data(&mut self, data: DataEntity) -> Handle<DataEntity> {
         let data = AliasableBox::from_box(Box::new(data));
-        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&data), self.id) };
+        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&data), self.guard) };
         self.datas.push(data);
         handle
     }
@@ -133,7 +133,7 @@ impl Store {
     pub(crate) fn insert_extern(&mut self, extern_: ExternEntity) -> Handle<ExternEntity> {
         let mut extern_ = AliasableBox::from_box(Box::new(extern_));
         let handle =
-            unsafe { Handle::from_unguarded(NonNull::new_unchecked(&mut *extern_), self.id) };
+            unsafe { Handle::from_unguarded(NonNull::new_unchecked(&mut *extern_), self.guard) };
         self.externs.push(extern_);
         handle
     }
@@ -182,17 +182,17 @@ pub(crate) struct UnguardedInternedFuncType(usize);
 
 pub(crate) struct Handle<T> {
     unguarded: UnguardedHandle<T>,
-    store_guard: StoreGuard,
+    guard: StoreGuard,
 }
 
 impl<T> Handle<T> {
     pub(crate) fn as_ref(self, store: &Store) -> &T {
-        assert_eq!(store.id, self.store_guard, "store mismatch");
+        assert_eq!(store.guard, self.guard, "store mismatch");
         unsafe { self.unguarded.as_ref() }
     }
 
     pub(crate) fn as_mut(mut self, store: &mut Store) -> &mut T {
-        assert_eq!(store.id, self.store_guard, "store mismatch");
+        assert_eq!(store.guard, self.guard, "store mismatch");
         unsafe { self.unguarded.as_mut() }
     }
 }
@@ -204,12 +204,12 @@ impl<T> Guarded for Handle<T> {
     unsafe fn from_unguarded(unguarded: UnguardedHandle<T>, store_id: StoreGuard) -> Self {
         Self {
             unguarded,
-            store_guard: store_id,
+            guard: store_id,
         }
     }
 
     fn to_unguarded(self, store_id: StoreGuard) -> UnguardedHandle<T> {
-        assert_eq!(store_id, self.store_guard);
+        assert_eq!(store_id, self.guard);
         self.unguarded
     }
 }
@@ -229,7 +229,7 @@ impl<T> PartialEq for Handle<T> {
         if self.unguarded != other.unguarded {
             return false;
         }
-        if self.store_guard != other.store_guard {
+        if self.guard != other.guard {
             return false;
         }
         true
@@ -242,7 +242,7 @@ impl<T> Hash for Handle<T> {
         H: Hasher,
     {
         self.unguarded.hash(state);
-        self.store_guard.hash(state);
+        self.guard.hash(state);
     }
 }
 
@@ -250,7 +250,7 @@ impl<T> fmt::Debug for Handle<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Handle")
             .field("unguarded", &self.unguarded)
-            .field("guard", &self.store_guard)
+            .field("guard", &self.guard)
             .finish()
     }
 }
@@ -262,8 +262,8 @@ pub(crate) struct HandlePair<T, U>(pub(crate) Handle<T>, pub(crate) Handle<U>);
 
 impl<T, U> HandlePair<T, U> {
     pub(crate) fn as_mut_pair(mut self, store: &Store) -> (&mut T, &mut U) {
-        assert_eq!(store.id(), self.0.store_guard, "store mismatch");
-        assert_eq!(store.id(), self.1.store_guard, "store mismatch");
+        assert_eq!(store.guard(), self.0.guard, "store mismatch");
+        assert_eq!(store.guard(), self.1.guard, "store mismatch");
         assert_ne!(
             self.0.unguarded.as_ptr() as usize,
             self.1.unguarded.as_ptr() as usize,

@@ -28,7 +28,7 @@ impl Global {
     ///
     /// If the initialization [`Val`] is not owned by the given [`Store`].
     pub fn new(store: &mut Store, type_: GlobalType, val: Val) -> Result<Self, GlobalError> {
-        unsafe { Global::new_unguarded(store, type_, val.to_unguarded(store.id())) }
+        unsafe { Global::new_unguarded(store, type_, val.to_unguarded(store.guard())) }
     }
 
     /// An unguarded version of [`Global::new`].
@@ -92,7 +92,7 @@ impl Global {
 
     /// Returns the value of this [`Global`].
     pub fn get(self, store: &Store) -> Val {
-        unsafe { Val::from_unguarded(self.get_unguarded(store), store.id()) }
+        unsafe { Val::from_unguarded(self.get_unguarded(store), store.guard()) }
     }
 
     /// An unguarded version of [`Global::get`].
@@ -118,7 +118,7 @@ impl Global {
     ///
     /// If the given [`Val`] is not owned by the given [`Store`].
     pub fn set(self, store: &mut Store, val: Val) -> Result<(), GlobalError> {
-        unsafe { self.set_unguarded(store, val.to_unguarded(store.id())) }
+        unsafe { self.set_unguarded(store, val.to_unguarded(store.guard())) }
     }
 
     /// An unguarded version of [`Global::set`].

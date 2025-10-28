@@ -32,7 +32,7 @@ impl Table {
     /// - If the initialization [`Ref`] is not owned by the given [`Store`].
     pub fn new(store: &mut Store, type_: TableType, val: Ref) -> Result<Self, TableError> {
         assert!(type_.is_valid(), "invalid table type");
-        unsafe { Self::new_unguarded(store, type_, val.to_unguarded(store.id())) }
+        unsafe { Self::new_unguarded(store, type_, val.to_unguarded(store.guard())) }
     }
 
     /// An unguarded version of [`Table::new`].
@@ -73,7 +73,7 @@ impl Table {
     /// - If the access is out of bounds.
     pub fn get(self, store: &Store, idx: u32) -> Option<Ref> {
         self.get_unguarded(store, idx)
-            .map(|val| unsafe { Ref::from_unguarded(val, store.id()) })
+            .map(|val| unsafe { Ref::from_unguarded(val, store.guard()) })
     }
 
     /// An unguarded version of [`Table::get`].
@@ -96,7 +96,7 @@ impl Table {
     ///
     /// - If the given [`Ref`] is not owned by the given [`Store`].
     pub fn set(self, store: &mut Store, idx: u32, val: Ref) -> Result<(), TableError> {
-        unsafe { self.set_unguarded(store, idx, val.to_unguarded(store.id())) }
+        unsafe { self.set_unguarded(store, idx, val.to_unguarded(store.guard())) }
     }
 
     /// An unguarded version of [`Table::set`].
@@ -135,7 +135,7 @@ impl Table {
     ///
     /// - If the given initialization [`Ref`] is not owned by the given [`Store`].
     pub fn grow(self, store: &mut Store, val: Ref, count: u32) -> Result<(), TableError> {
-        unsafe { self.grow_unguarded(store, val.to_unguarded(store.id()), count) }
+        unsafe { self.grow_unguarded(store, val.to_unguarded(store.guard()), count) }
     }
 
     /// An unguarded version of [`Table::grow`].
