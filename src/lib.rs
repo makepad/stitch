@@ -13,10 +13,8 @@ mod engine;
 mod error;
 mod exec;
 mod extern_;
-mod extern_ref;
 mod extern_val;
 mod func;
-mod func_ref;
 mod global;
 mod guarded;
 mod instance;
@@ -38,17 +36,16 @@ pub use self::{
     decode::DecodeError,
     engine::Engine,
     error::Error,
-    extern_ref::ExternRef,
+    extern_::Extern,
     extern_val::{ExternType, ExternVal},
     func::{Func, FuncError, FuncType},
-    func_ref::FuncRef,
     global::{Global, GlobalError, GlobalType, Mut},
     instance::{Instance, InstanceExports},
     limits::Limits,
     linker::{InstantiateError, Linker},
     mem::{Mem, MemError, MemType},
     module::{Module, ModuleExports, ModuleImports},
-    ref_::{Ref, RefType},
+    ref_::{ExternRef, FuncRef, Ref, RefType},
     store::Store,
     table::{Table, TableError, TableType},
     val::{Val, ValType},

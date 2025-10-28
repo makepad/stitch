@@ -2,9 +2,8 @@ use {
     crate::{
         decode::{Decode, DecodeError, Decoder},
         downcast::{DowncastMut, DowncastRef},
-        extern_ref::UnguardedExternRef,
-        func_ref::UnguardedFuncRef,
         guarded::Guarded,
+        ref_::{UnguardedExternRef, UnguardedFuncRef},
         store::{Handle, Store, StoreGuard, UnguardedHandle},
         val::{UnguardedVal, Val, ValType},
     },

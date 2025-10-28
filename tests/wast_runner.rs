@@ -1,6 +1,6 @@
 use {
     makepad_stitch::{
-        Engine, Error, ExternRef, Func, FuncRef, Global, GlobalType, Instance, Limits, Linker, Mem,
+        Engine, Error, Extern, ExternRef, Func, FuncRef, Global, GlobalType, Instance, Limits, Linker, Mem,
         MemType, Module, Mut, Ref, RefType, Store, Table, TableType, Val, ValType,
     },
     std::{collections::HashMap, sync::Arc},
@@ -253,9 +253,9 @@ impl WastRunner {
                     WastArgCore::I64(arg) => arg.into(),
                     WastArgCore::F32(arg) => f32::from_bits(arg.bits).into(),
                     WastArgCore::F64(arg) => f64::from_bits(arg.bits).into(),
-                    WastArgCore::RefNull(HeapType::Func) => FuncRef::null().into(),
-                    WastArgCore::RefNull(HeapType::Extern) => ExternRef::null().into(),
-                    WastArgCore::RefExtern(val) => ExternRef::new(&mut self.store, val).into(),
+                    WastArgCore::RefNull(HeapType::Func) => FuncRef::None.into(),
+                    WastArgCore::RefNull(HeapType::Extern) => ExternRef::None.into(),
+                    WastArgCore::RefExtern(val) => ExternRef::Some(Extern::new(&mut self.store, val)).into(),
                     _ => unimplemented!(),
                 },
                 _ => unimplemented!(),
@@ -332,18 +332,17 @@ fn assert_result(store: &Store, actual: Val, expected: WastRet<'_>) {
                 }
             },
             WastRetCore::RefNull(Some(HeapType::Func)) => {
-                assert_eq!(actual, Val::FuncRef(FuncRef::null()));
+                assert_eq!(actual, Val::FuncRef(None));
             }
             WastRetCore::RefNull(Some(HeapType::Extern)) => {
-                assert_eq!(actual, Val::ExternRef(ExternRef::null()));
+                assert_eq!(actual, Val::ExternRef(ExternRef::None));
             }
             WastRetCore::RefExtern(expected) => {
                 assert_eq!(
                     actual
                         .to_extern_ref()
                         .unwrap()
-                        .get(store)
-                        .map(|val| { *val.downcast_ref::<u32>().unwrap() }),
+                        .map(|val| { *val.get(store).downcast_ref::<u32>().unwrap() }),
                     expected
                 );
             }

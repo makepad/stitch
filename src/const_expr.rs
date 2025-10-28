@@ -1,7 +1,6 @@
 use crate::{
     decode::{Decode, DecodeError, Decoder},
     func::Func,
-    func_ref::FuncRef,
     global::{Global, Mut},
     module::ModuleBuilder,
     ref_::{Ref, RefType},
@@ -56,7 +55,7 @@ impl ConstExpr {
             ConstInstr::F32Const(val) => val.into(),
             ConstInstr::F64Const(val) => val.into(),
             ConstInstr::RefNull(ref_ty) => Ref::null(ref_ty).into(),
-            ConstInstr::RefFunc(func_idx) => FuncRef::new(context.func(func_idx).unwrap()).into(),
+            ConstInstr::RefFunc(func_idx) => Some(context.func(func_idx).unwrap()).into(),
             ConstInstr::GlobalGet(global_idx) => {
                 context.global(global_idx).unwrap().get(store).into()
             }

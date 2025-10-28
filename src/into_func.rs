@@ -1,10 +1,9 @@
 use crate::{
     exec,
     error::Error,
-    extern_ref::{ExternRef, UnguardedExternRef},
     func::{Caller, FuncType, HostFuncTrampoline},
-    func_ref::{FuncRef, UnguardedFuncRef},
     guarded::Guarded,
+    ref_::{ExternRef, FuncRef, UnguardedExternRef, UnguardedFuncRef},
     stack::padded_size_of,
     store::{Store, StoreGuard},
     val::ValType,

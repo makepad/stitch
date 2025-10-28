@@ -10,14 +10,12 @@ use {
         downcast::{DowncastRef, DowncastMut},
         exec,
         exec::{ReadImm, ReadFromReg, ReadFromPtr, ReadReg, ReadStack, ThreadedInstr, WriteReg, WriteStack, WriteToReg, WriteToPtr},
-        extern_ref::{ExternRef, UnguardedExternRef},
         func::{CompiledFuncBody, Func, FuncEntity, FuncType, InstrSlot, UncompiledFuncBody},
-        func_ref::{FuncRef, UnguardedFuncRef},
         global::{GlobalEntity, GlobalEntityT},
         guarded::Guarded,
         instance::Instance,
         ops::*,
-        ref_::RefType,
+        ref_::{ExternRef, FuncRef, RefType, UnguardedExternRef, UnguardedFuncRef},
         store::Store,
         table::{TableEntity, TableEntityT},
         val::{UnguardedVal, ValType, ValTypeOf},
@@ -1513,8 +1511,8 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit_instr(select_ref_null(type_));
 
         match type_ {
-            RefType::FuncRef => self.emit(FuncRef::null().to_unguarded(self.store.id())),
-            RefType::ExternRef => self.emit(ExternRef::null().to_unguarded(self.store.id())),
+            RefType::FuncRef => self.emit(FuncRef::None.to_unguarded(self.store.id())),
+            RefType::ExternRef => self.emit(ExternRef::None.to_unguarded(self.store.id())),
         };
 
         // Push the output onto the stack and emit its stack offset.

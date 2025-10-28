@@ -1,9 +1,7 @@
 use crate::{
     downcast::{DowncastMut, DowncastRef},
-    extern_ref::UnguardedExternRef,
-    func_ref::UnguardedFuncRef,
     guarded::Guarded,
-    ref_::RefType,
+    ref_::{RefType, UnguardedExternRef, UnguardedFuncRef},
     store::{Handle, Store, StoreGuard, UnguardedHandle},
 };
 

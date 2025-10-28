@@ -1,10 +1,8 @@
 use {
     crate::{
         decode::{Decode, DecodeError, Decoder},
-        extern_ref::{ExternRef, UnguardedExternRef},
-        func_ref::{FuncRef, UnguardedFuncRef},
         guarded::Guarded,
-        ref_::{Ref, RefType, UnguardedRef},
+        ref_::{ExternRef, Ref, RefType, UnguardedRef, FuncRef, UnguardedExternRef, UnguardedFuncRef},
         stack::padded_size_of,
         store::StoreGuard,
     },
@@ -30,8 +28,8 @@ impl Val {
             ValType::I64 => 0i64.into(),
             ValType::F32 => 0f32.into(),
             ValType::F64 => 0f64.into(),
-            ValType::FuncRef => FuncRef::null().into(),
-            ValType::ExternRef => ExternRef::null().into(),
+            ValType::FuncRef => FuncRef::None.into(),
+            ValType::ExternRef => ExternRef::None.into(),
         }
     }
 

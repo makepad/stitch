@@ -1,7 +1,7 @@
 use crate::{
     decode::{Decode, DecodeError, Decoder},
-    extern_ref::{ExternRef, UnguardedExternRef},
-    func_ref::{FuncRef, UnguardedFuncRef},
+    func::{Func, UnguardedFunc},
+    extern_::{Extern, UnguardedExtern},
     guarded::Guarded,
     store::StoreGuard,
 };
@@ -17,8 +17,8 @@ impl Ref {
     /// Returns a null [`Ref`] of the given [`RefType`].
     pub fn null(type_: RefType) -> Self {
         match type_ {
-            RefType::FuncRef => FuncRef::null().into(),
-            RefType::ExternRef => ExternRef::null().into(),
+            RefType::FuncRef => FuncRef::None.into(),
+            RefType::ExternRef => ExternRef::None.into(),
         }
     }
 
@@ -88,6 +88,9 @@ impl From<ExternRef> for Ref {
     }
 }
 
+pub type FuncRef = Option<Func>;
+pub type ExternRef = Option<Extern>;
+
 /// An unguarded [`Ref`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum UnguardedRef {
@@ -106,6 +109,9 @@ impl From<UnguardedExternRef> for UnguardedRef {
         UnguardedRef::ExternRef(val)
     }
 }
+
+pub type UnguardedFuncRef = Option<UnguardedFunc>;
+pub type UnguardedExternRef = Option<UnguardedExtern>;
 
 /// The type of a [`Ref`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
