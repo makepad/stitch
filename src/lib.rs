@@ -25,6 +25,7 @@ mod mem;
 mod module;
 mod ops;
 mod ref_;
+mod slice;
 mod stack;
 mod store;
 mod table;
