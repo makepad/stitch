@@ -1,7 +1,7 @@
 use crate::{
     downcast::{DowncastMut, DowncastRef},
     guarded::Guarded,
-    ref_::{RefType, UnguardedExternRef, UnguardedFuncRef},
+    ref_::{ExternRef, FuncRef, RefType, UnguardedExternRef, UnguardedFuncRef},
     store::{Handle, Store, StoreGuard, UnguardedHandle},
 };
 
@@ -13,10 +13,10 @@ pub(crate) struct Elem(pub(crate) Handle<ElemEntity>);
 impl Elem {
     pub(crate) unsafe fn new_unguarded(store: &mut Store, elems: UnguardedElems) -> Self {
         Self(store.insert_elem(match elems {
-            UnguardedElems::FuncRef(elems) => ElemEntity::FuncRef(ElemEntityT {
+            UnguardedElems::FuncRef(elems) => ElemEntity::FuncRef(TypedElemEntity {
                 elems: elems.into(),
             }),
-            UnguardedElems::ExternRef(elems) => ElemEntity::ExternRef(ElemEntityT {
+            UnguardedElems::ExternRef(elems) => ElemEntity::ExternRef(TypedElemEntity {
                 elems: elems.into(),
             }),
         }))
@@ -60,33 +60,41 @@ pub(crate) enum UnguardedElems {
 
 #[derive(Debug)]
 pub(crate) enum ElemEntity {
-    FuncRef(ElemEntityT<UnguardedFuncRef>),
-    ExternRef(ElemEntityT<UnguardedExternRef>),
+    FuncRef(TypedElemEntity<FuncRef>),
+    ExternRef(TypedElemEntity<ExternRef>),
 }
 
 impl ElemEntity {
-    pub(crate) fn downcast_ref<T>(&self) -> Option<&ElemEntityT<T>>
+    pub(crate) fn downcast_ref<T>(&self) -> Option<&TypedElemEntity<T>>
     where
-        ElemEntityT<T>: DowncastRef<Self>,
+        T: Guarded,
+        TypedElemEntity<T>: DowncastRef<Self>,
     {
-        ElemEntityT::downcast_ref(self)
+        TypedElemEntity::downcast_ref(self)
     }
 
-    pub(crate) fn downcast_mut<T>(&mut self) -> Option<&mut ElemEntityT<T>>
+    pub(crate) fn downcast_mut<T>(&mut self) -> Option<&mut TypedElemEntity<T>>
     where
-        ElemEntityT<T>: DowncastMut<Self>,
+        T: Guarded,
+        TypedElemEntity<T>: DowncastMut<Self>,
     {
-        ElemEntityT::downcast_mut(self)
+        TypedElemEntity::downcast_mut(self)
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct ElemEntityT<T> {
-    elems: Box<[T]>,
+pub(crate) struct TypedElemEntity<T>
+where 
+    T: Guarded
+{
+    elems: Box<[T::Unguarded]>,
 }
 
-impl<T> ElemEntityT<T> {
-    pub(crate) fn elems(&self) -> &[T] {
+impl<T> TypedElemEntity<T>
+where 
+    T: Guarded
+{
+    pub(crate) fn elems(&self) -> &[T::Unguarded] {
         &self.elems
     }
 
@@ -95,7 +103,7 @@ impl<T> ElemEntityT<T> {
     }
 }
 
-impl DowncastRef<ElemEntity> for ElemEntityT<UnguardedFuncRef> {
+impl DowncastRef<ElemEntity> for TypedElemEntity<FuncRef> {
     fn downcast_ref(elem: &ElemEntity) -> Option<&Self> {
         match elem {
             ElemEntity::FuncRef(elem) => Some(elem),
@@ -104,7 +112,7 @@ impl DowncastRef<ElemEntity> for ElemEntityT<UnguardedFuncRef> {
     }
 }
 
-impl DowncastMut<ElemEntity> for ElemEntityT<UnguardedExternRef> {
+impl DowncastMut<ElemEntity> for TypedElemEntity<ExternRef> {
     fn downcast_mut(elem: &mut ElemEntity) -> Option<&mut Self> {
         match elem {
             ElemEntity::ExternRef(elem) => Some(elem),
@@ -113,20 +121,22 @@ impl DowncastMut<ElemEntity> for ElemEntityT<UnguardedExternRef> {
     }
 }
 
-impl DowncastRef<ElemEntity> for ElemEntityT<UnguardedExternRef> {
+impl DowncastRef<ElemEntity> for TypedElemEntity<ExternRef> {
     fn downcast_ref(elem: &ElemEntity) -> Option<&Self> {
-        match elem {
-            ElemEntity::ExternRef(elem) => Some(elem),
-            _ => None,
+        if let ElemEntity::ExternRef(elem) = elem {
+            Some(elem)
+        } else {
+            None
         }
     }
 }
 
-impl DowncastMut<ElemEntity> for ElemEntityT<UnguardedFuncRef> {
+impl DowncastMut<ElemEntity> for TypedElemEntity<FuncRef> {
     fn downcast_mut(elem: &mut ElemEntity) -> Option<&mut Self> {
-        match elem {
-            ElemEntity::FuncRef(elem) => Some(elem),
-            _ => None,
+        if let ElemEntity::FuncRef(elem) = elem {
+            Some(elem)
+        } else {
+            None
         }
     }
 }

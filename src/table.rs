@@ -2,10 +2,10 @@ use {
     crate::{
         decode::{Decode, DecodeError, Decoder},
         downcast::{DowncastMut, DowncastRef},
-        elem::{Elem, ElemEntity, ElemEntityT},
+        elem::{Elem, ElemEntity, TypedElemEntity},
         guarded::Guarded,
         limits::Limits,
-        ref_::{Ref, RefType, UnguardedExternRef, UnguardedFuncRef, UnguardedRef},
+        ref_::{ExternRef, FuncRef, Ref, RefType, UnguardedRef},
         store::{Handle, HandlePair, Store, StoreGuard, UnguardedHandle},
         trap::Trap,
     },
@@ -30,23 +30,17 @@ impl Table {
     ///
     /// - If the [`TableType`] is invalid.
     /// - If the initialization [`Ref`] is not owned by the given [`Store`].
-    pub fn new(store: &mut Store, type_: TableType, val: Ref) -> Result<Self, TableError> {
-        assert!(type_.is_valid(), "invalid table type");
-        unsafe { Self::new_unguarded(store, type_, val.to_unguarded(store.id())) }
-    }
-
-    /// An unguarded version of [`Table::new`].
-    unsafe fn new_unguarded(
+    pub fn new(
         store: &mut Store,
         type_: TableType,
-        val: UnguardedRef,
+        val: Ref,
     ) -> Result<Self, TableError> {
         match (type_.elem, val) {
-            (RefType::FuncRef, UnguardedRef::FuncRef(val)) => Ok(Self(
-                store.insert_table(TableEntity::FuncRef(TableEntityT::new(type_.limits, val))),
+            (RefType::FuncRef, Ref::FuncRef(val)) => Ok(Self(
+                store.insert_table(TableEntity::FuncRef(TypedTableEntity::new(type_.limits, val, store.id()))),
             )),
-            (RefType::ExternRef, UnguardedRef::ExternRef(val)) => Ok(Self(
-                store.insert_table(TableEntity::ExternRef(TableEntityT::new(type_.limits, val))),
+            (RefType::ExternRef, Ref::ExternRef(val)) => Ok(Self(
+                store.insert_table(TableEntity::ExternRef(TypedTableEntity::new(type_.limits, val, store.id()))),
             )),
             _ => Err(TableError::ElemTypeMismatch),
         }
@@ -72,43 +66,22 @@ impl Table {
     ///
     /// - If the access is out of bounds.
     pub fn get(self, store: &Store, idx: u32) -> Option<Ref> {
-        self.get_unguarded(store, idx)
-            .map(|val| unsafe { Ref::from_unguarded(val, store.id()) })
-    }
-
-    /// An unguarded version of [`Table::get`].
-    fn get_unguarded(self, store: &Store, idx: u32) -> Option<UnguardedRef> {
         match self.0.as_ref(store) {
-            TableEntity::FuncRef(table) => table.get(idx).map(UnguardedRef::FuncRef),
-            TableEntity::ExternRef(table) => table.get(idx).map(UnguardedRef::ExternRef),
+            TableEntity::FuncRef(table) => table.get(idx).map(Into::into),
+            TableEntity::ExternRef(table) => table.get(idx).map(Into::into),
         }
     }
 
-    /// Sets the element at the given index in this [`Table`] to the given [`Ref`].
-    ///
-    /// # Errors
-    ///
-    /// - If the access is out of bounds.
-    /// - If the [`RefType`] of the given [`Ref`] does not match the [`RefType`] of the elements in
-    ///   this [`Table`].
-    ///
-    /// # Panics
-    ///
-    /// - If the given [`Ref`] is not owned by the given [`Store`].
-    pub fn set(self, store: &mut Store, idx: u32, val: Ref) -> Result<(), TableError> {
-        unsafe { self.set_unguarded(store, idx, val.to_unguarded(store.id())) }
-    }
-
     /// An unguarded version of [`Table::set`].
-    unsafe fn set_unguarded(
+    pub fn set(
         self,
         store: &mut Store,
         idx: u32,
-        val: UnguardedRef,
+        val: Ref,
     ) -> Result<(), TableError> {
         match (self.0.as_mut(store), val) {
-            (TableEntity::FuncRef(table), UnguardedRef::FuncRef(val)) => table.set(idx, val),
-            (TableEntity::ExternRef(table), UnguardedRef::ExternRef(val)) => table.set(idx, val),
+            (TableEntity::FuncRef(table), Ref::FuncRef(val)) => table.set(idx, val),
+            (TableEntity::ExternRef(table), Ref::ExternRef(val)) => table.set(idx, val),
             _ => Err(TableError::ElemTypeMismatch),
         }
     }
@@ -146,8 +119,8 @@ impl Table {
         count: u32,
     ) -> Result<(), TableError> {
         match (self.0.as_mut(store), val) {
-            (TableEntity::FuncRef(table), UnguardedRef::FuncRef(val)) => table.grow(val, count),
-            (TableEntity::ExternRef(table), UnguardedRef::ExternRef(val)) => table.grow(val, count),
+            (TableEntity::FuncRef(table), UnguardedRef::FuncRef(val)) => table.grow_unguarded(val, count),
+            (TableEntity::ExternRef(table), UnguardedRef::ExternRef(val)) => table.grow_unguarded(val, count),
             _ => Err(TableError::ElemTypeMismatch),
         }
         .map(|_| ())
@@ -257,47 +230,58 @@ impl Error for TableError {}
 /// The representation of a [`Table`] in a [`Store`].
 #[derive(Debug)]
 pub(crate) enum TableEntity {
-    FuncRef(TableEntityT<UnguardedFuncRef>),
-    ExternRef(TableEntityT<UnguardedExternRef>),
+    FuncRef(TypedTableEntity<FuncRef>),
+    ExternRef(TypedTableEntity<ExternRef>),
 }
 
 impl TableEntity {
     /// Returns a reference to the inner value of this [`TableEntity`] if it is a
     /// [`TableEntityT<T>`].
-    pub(crate) fn downcast_ref<T>(&self) -> Option<&TableEntityT<T>>
+    pub(crate) fn downcast_ref<T>(&self) -> Option<&TypedTableEntity<T>>
     where
-        TableEntityT<T>: DowncastRef<Self>,
+        T: Guarded,
+        TypedTableEntity<T>: DowncastRef<Self>,
     {
-        TableEntityT::downcast_ref(self)
+        TypedTableEntity::downcast_ref(self)
     }
 
     /// Returns a mutable reference to the inner value of this [`TableEntity`] if it is a
     /// [`TableEntityT<T>`].
-    pub(crate) fn downcast_mut<T>(&mut self) -> Option<&mut TableEntityT<T>>
+    pub(crate) fn downcast_mut<T>(&mut self) -> Option<&mut TypedTableEntity<T>>
     where
-        TableEntityT<T>: DowncastMut<Self>,
+        T: Guarded,
+        TypedTableEntity<T>: DowncastMut<Self>,
     {
-        TableEntityT::downcast_mut(self)
+        TypedTableEntity::downcast_mut(self)
     }
 }
 
 /// A typed [`TableEntity`].
 #[derive(Debug)]
-pub(crate) struct TableEntityT<T> {
+pub(crate) struct TypedTableEntity<T>
+where 
+    T: Guarded
+{
     max: Option<u32>,
-    elems: Vec<T>,
+    elems: Vec<T::Unguarded>,
+    guard: T::Guard,
 }
 
-impl<T> TableEntityT<T>
+impl<T> TypedTableEntity<T>
 where
-    T: Copy,
+    T: Guarded,
 {
-    /// Creates a new [`TableEntityT`] with the given [`Limits`] and initialization value.
-    fn new(limits: Limits, val: T) -> Self {
+    fn new(limits: Limits, val: T, guard: T::Guard) -> Self {
+        let val = val.to_unguarded(guard);
+        unsafe { Self::new_unguarded(limits, val, guard) }
+    }
+
+    unsafe fn new_unguarded(limits: Limits, val: T::Unguarded, guard: T::Guard) -> Self {
         let min = limits.min as usize;
         Self {
             max: limits.max,
             elems: vec![val; min],
+            guard,
         }
     }
 
@@ -315,6 +299,11 @@ where
     ///
     /// If the access is out of bounds.
     pub(crate) fn get(&self, idx: u32) -> Option<T> {
+        let val = self.get_unguarded(idx)?;
+        Some(unsafe { T::from_unguarded(val, self.guard) })
+    }
+
+    pub(crate) fn get_unguarded(&self, idx: u32) -> Option<T::Unguarded> {
         let idx = idx as usize;
         let elem = self.elems.get(idx)?;
         Some(*elem)
@@ -325,7 +314,12 @@ where
     /// # Errors
     ///
     /// If the access is out of bounds.
-    pub(crate) fn set(&mut self, idx: u32, val: T) -> Result<(), TableError> {
+    pub(crate) fn set(&mut self, index: u32, val: T) -> Result<(), TableError> {
+        let val = val.to_unguarded(self.guard);
+        unsafe { self.set_unguarded(index, val) }
+    }
+
+    pub(crate) unsafe fn set_unguarded(&mut self, idx: u32, val: T::Unguarded) -> Result<(), TableError> {
         let idx = idx as usize;
         let elem = self
             .elems
@@ -348,7 +342,7 @@ where
     /// # Errors
     ///
     /// If this [`TableEntity`] failed to grow.
-    pub(crate) fn grow(&mut self, val: T, count: u32) -> Result<u32, TableError> {
+    pub(crate) unsafe fn grow_unguarded(&mut self, val: T::Unguarded, count: u32) -> Result<u32, TableError> {
         if count > self.max.unwrap_or(u32::MAX) - self.size() {
             return Err(TableError::FailedToGrow)?;
         }
@@ -358,13 +352,11 @@ where
         Ok(size)
     }
 
-    pub(crate) fn fill(&mut self, idx: u32, val: T, count: u32) -> Result<(), Trap> {
-        let idx = idx as usize;
-        let count = count as usize;
+    pub(crate) unsafe fn fill_unguarded(&mut self, idx: u32, val: T::Unguarded, count: u32) -> Result<(), Trap> {
         let elems = self
             .elems
-            .get_mut(idx..)
-            .and_then(|elems| elems.get_mut(..count))
+            .get_mut(idx as usize..)
+            .and_then(|elems| elems.get_mut(..count as usize))
             .ok_or(Trap::TableAccessOutOfBounds)?;
         elems.fill(val);
         Ok(())
@@ -373,7 +365,7 @@ where
     pub(crate) fn copy(
         &mut self,
         dst_idx: u32,
-        src_table: &TableEntityT<T>,
+        src_table: &TypedTableEntity<T>,
         src_idx: u32,
         count: u32,
     ) -> Result<(), Trap> {
@@ -416,7 +408,7 @@ where
     pub(crate) fn init(
         &mut self,
         dst_idx: u32,
-        src_elem: &ElemEntityT<T>,
+        src_elem: &TypedElemEntity<T>,
         src_idx: u32,
         count: u32,
     ) -> Result<(), Trap> {
@@ -438,38 +430,42 @@ where
     }
 }
 
-impl DowncastRef<TableEntity> for TableEntityT<UnguardedFuncRef> {
+impl DowncastRef<TableEntity> for TypedTableEntity<FuncRef> {
     fn downcast_ref(table: &TableEntity) -> Option<&Self> {
-        match table {
-            TableEntity::FuncRef(table) => Some(table),
-            _ => None,
+        if let TableEntity::FuncRef(table) = table {
+            Some(table)
+        } else {
+            None
         }
     }
 }
 
-impl DowncastMut<TableEntity> for TableEntityT<UnguardedFuncRef> {
+impl DowncastMut<TableEntity> for TypedTableEntity<FuncRef> {
     fn downcast_mut(table: &mut TableEntity) -> Option<&mut Self> {
-        match table {
-            TableEntity::FuncRef(table) => Some(table),
-            _ => None,
+        if let TableEntity::FuncRef(table) = table {
+            Some(table)
+        } else {
+            None
         }
     }
 }
 
-impl DowncastRef<TableEntity> for TableEntityT<UnguardedExternRef> {
+impl DowncastRef<TableEntity> for TypedTableEntity<ExternRef> {
     fn downcast_ref(table: &TableEntity) -> Option<&Self> {
-        match table {
-            TableEntity::ExternRef(table) => Some(table),
-            _ => None,
+        if let TableEntity::ExternRef(table) = table {
+            Some(table)
+        } else {
+            None
         }
     }
 }
 
-impl DowncastMut<TableEntity> for TableEntityT<UnguardedExternRef> {
+impl DowncastMut<TableEntity> for TypedTableEntity<ExternRef> {
     fn downcast_mut(table: &mut TableEntity) -> Option<&mut Self> {
-        match table {
-            TableEntity::ExternRef(table) => Some(table),
-            _ => None,
+        if let TableEntity::ExternRef(table) = table {
+            Some(table)
+        } else {
+            None
         }
     }
 }

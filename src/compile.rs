@@ -17,7 +17,7 @@ use {
         ops::*,
         ref_::{ExternRef, FuncRef, RefType, UnguardedExternRef, UnguardedFuncRef},
         store::Store,
-        table::{TableEntity, TableEntityT},
+        table::{TableEntity, TypedTableEntity},
         val::{UnguardedVal, ValType, ValTypeOf},
     },
     std::{mem, ops::{Deref, Index, IndexMut}, ptr},
@@ -3374,15 +3374,16 @@ where
 
 fn select_table_get(type_: RefType, input: OpdKind) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => select_table_get_inner::<UnguardedFuncRef>(input),
-        RefType::ExternRef => select_table_get_inner::<UnguardedExternRef>(input),
+        RefType::FuncRef => select_table_get_inner::<FuncRef>(input),
+        RefType::ExternRef => select_table_get_inner::<ExternRef>(input),
     }
 }
 
 fn select_table_get_inner<T>(input: OpdKind) -> ThreadedInstr
 where
-    TableEntityT<T>: DowncastRef<TableEntity>,
-    T: Copy + ReadFromReg + WriteToReg
+    T: Guarded,
+    T::Unguarded: ReadFromReg + WriteToReg,
+    TypedTableEntity<T>: DowncastRef<TableEntity>,
 {
     match input {
         OpdKind::Imm => exec::table_get::<T, ReadImm, WriteStack>,
@@ -3393,15 +3394,16 @@ where
 
 fn select_table_set(type_: RefType, input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => select_table_set_inner::<UnguardedFuncRef>(input_0, input_1),
-        RefType::ExternRef => select_table_set_inner::<UnguardedExternRef>(input_0, input_1),
+        RefType::FuncRef => select_table_set_inner::<FuncRef>(input_0, input_1),
+        RefType::ExternRef => select_table_set_inner::<ExternRef>(input_0, input_1),
     }
 }
 
 fn select_table_set_inner<T>(input_0: OpdKind, input_1: OpdKind) -> ThreadedInstr
 where
-    TableEntityT<T>: DowncastMut<TableEntity>,
-    T: Copy + ReadFromReg
+    T: Guarded,
+    T::Unguarded: ReadFromReg,
+    TypedTableEntity<T>: DowncastMut<TableEntity>,
 {
     match (input_0, input_1) {
         (OpdKind::Imm, OpdKind::Imm) => exec::table_set::<T, ReadImm, ReadImm>,
@@ -3418,43 +3420,43 @@ where
 
 fn select_table_size(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::table_size::<UnguardedFuncRef, WriteStack>,
-        RefType::ExternRef => exec::table_size::<UnguardedExternRef, WriteStack>,
+        RefType::FuncRef => exec::table_size::<FuncRef, WriteStack>,
+        RefType::ExternRef => exec::table_size::<ExternRef, WriteStack>,
     }
 }
 
 fn select_table_grow(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::table_grow::<UnguardedFuncRef, ReadStack, ReadStack, WriteStack>,
-        RefType::ExternRef => exec::table_grow::<UnguardedExternRef, ReadStack, ReadStack, WriteStack>,
+        RefType::FuncRef => exec::table_grow::<FuncRef, ReadStack, ReadStack, WriteStack>,
+        RefType::ExternRef => exec::table_grow::<ExternRef, ReadStack, ReadStack, WriteStack>,
     }
 }
 
 fn select_table_fill(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::table_fill::<UnguardedFuncRef, ReadStack, ReadStack, ReadStack>,
-        RefType::ExternRef => exec::table_fill::<UnguardedExternRef, ReadStack, ReadStack, ReadStack>,
+        RefType::FuncRef => exec::table_fill::<FuncRef, ReadStack, ReadStack, ReadStack>,
+        RefType::ExternRef => exec::table_fill::<ExternRef, ReadStack, ReadStack, ReadStack>,
     }
 }
 
 fn select_table_copy(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::table_copy::<UnguardedFuncRef, ReadStack, ReadStack, ReadStack>,
-        RefType::ExternRef => exec::table_copy::<UnguardedExternRef, ReadStack, ReadStack, ReadStack>,
+        RefType::FuncRef => exec::table_copy::<FuncRef, ReadStack, ReadStack, ReadStack>,
+        RefType::ExternRef => exec::table_copy::<ExternRef, ReadStack, ReadStack, ReadStack>,
     }
 }
 
 fn select_table_init(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::table_init::<UnguardedFuncRef, ReadStack, ReadStack, ReadStack>,
-        RefType::ExternRef => exec::table_init::<UnguardedExternRef, ReadStack, ReadStack, ReadStack>,
+        RefType::FuncRef => exec::table_init::<FuncRef, ReadStack, ReadStack, ReadStack>,
+        RefType::ExternRef => exec::table_init::<ExternRef, ReadStack, ReadStack, ReadStack>,
     }
 }
 
 fn select_elem_drop(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => exec::elem_drop::<UnguardedFuncRef>,
-        RefType::ExternRef => exec::elem_drop::<UnguardedExternRef>,
+        RefType::FuncRef => exec::elem_drop::<FuncRef>,
+        RefType::ExternRef => exec::elem_drop::<ExternRef>,
     }
 }
 
