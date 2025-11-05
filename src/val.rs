@@ -144,10 +144,10 @@ impl Guarded for Val {
     
     unsafe fn from_unguarded(unguarded: Self::Unguarded, guard: Self::Guard) -> Self {
         match unguarded {
-            UnguardedVal::I32(unguarded) => unguarded.into(),
-            UnguardedVal::I64(unguarded) => unguarded.into(),
-            UnguardedVal::F32(unguarded) => unguarded.into(),
-            UnguardedVal::F64(unguarded) => unguarded.into(),
+            UnguardedVal::I32(unguarded) => i32::from_unguarded(unguarded, guard).into(),
+            UnguardedVal::I64(unguarded) => i64::from_unguarded(unguarded, guard).into(),
+            UnguardedVal::F32(unguarded) => f32::from_unguarded(unguarded, guard).into(),
+            UnguardedVal::F64(unguarded) => f64::from_unguarded(unguarded, guard).into(),
             UnguardedVal::FuncRef(unguarded) => FuncRef::from_unguarded(unguarded, guard).into(),
             UnguardedVal::ExternRef(unguarded) => ExternRef::from_unguarded(unguarded, guard).into(),
         }
@@ -155,10 +155,10 @@ impl Guarded for Val {
 
     fn to_unguarded(self, guard: Self::Guard) -> Self::Unguarded {
         match self {
-            Val::I32(guarded) => guarded.into(),
-            Val::I64(guarded) => guarded.into(),
-            Val::F32(guarded) => guarded.into(),
-            Val::F64(guarded) => guarded.into(),
+            Val::I32(guarded) => guarded.to_unguarded(guard).into(),
+            Val::I64(guarded) => guarded.to_unguarded(guard).into(),
+            Val::F32(guarded) => guarded.to_unguarded(guard).into(),
+            Val::F64(guarded) => guarded.to_unguarded(guard).into(),
             Val::FuncRef(guarded) => guarded.to_unguarded(guard).into(),
             Val::ExternRef(guarded) => guarded.to_unguarded(guard).into(),
         }

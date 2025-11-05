@@ -10,7 +10,7 @@ use {
         error::Error,
         extern_::UnguardedExtern,
         func::{Caller, Func, FuncBody, FuncEntity, FuncType, InstrSlot, UnguardedFunc},
-        global::{GlobalEntity, GlobalEntityT, UnguardedGlobal},
+        global::{GlobalEntity, TypedGlobalEntity, UnguardedGlobal},
         guarded::Guarded,
         mem::UnguardedMem,
         ops::*,
@@ -710,15 +710,15 @@ pub(crate) unsafe extern "C" fn global_get<T, W>(
     cx: Cx,
 ) -> ControlFlowBits
 where
-    GlobalEntityT<T>: DowncastRef<GlobalEntity>,
-    T: Copy,
-    W: Write<T>,
+    T: Guarded,
+    TypedGlobalEntity<T>: DowncastRef<GlobalEntity>,
+    W: Write<T::Unguarded>,
 {
     unsafe {
         let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
         let global: UnguardedGlobal = args.read_imm();
         let global = global.as_ref().downcast_ref::<T>().unwrap_unchecked();
-        let val = global.get();
+        let val = global.get_unguarded();
         W::write(&mut args, val);
         args.next()
     }
@@ -735,16 +735,16 @@ pub(crate) unsafe extern "C" fn global_set<T, R>(
     cx: Cx,
 ) -> ControlFlowBits
 where
-    GlobalEntityT<T>: DowncastMut<GlobalEntity>,
-    T: Copy,
-    R: Read<T>,
+    T: Guarded,
+    TypedGlobalEntity<T>: DowncastMut<GlobalEntity>,
+    R: Read<T::Unguarded>,
 {
     unsafe {
         let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
         let val = R::read(&mut args);
         let mut global: UnguardedGlobal = args.read_imm();
         let global = global.as_mut().downcast_mut::<T>().unwrap_unchecked();
-        global.set(val);
+        global.set_unguarded(val);
         args.next()
     }
 }

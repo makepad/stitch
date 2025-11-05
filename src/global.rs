@@ -3,9 +3,9 @@ use {
         decode::{Decode, DecodeError, Decoder},
         downcast::{DowncastMut, DowncastRef},
         guarded::Guarded,
-        ref_::{UnguardedExternRef, UnguardedFuncRef},
+        ref_::{ExternRef, FuncRef},
         store::{Handle, Store, StoreGuard, UnguardedHandle},
-        val::{UnguardedVal, Val, ValType},
+        val::{Val, ValType},
     },
     std::{error::Error, fmt},
 };
@@ -28,33 +28,24 @@ impl Global {
     ///
     /// If the initialization [`Val`] is not owned by the given [`Store`].
     pub fn new(store: &mut Store, type_: GlobalType, val: Val) -> Result<Self, GlobalError> {
-        unsafe { Global::new_unguarded(store, type_, val.to_unguarded(store.id())) }
-    }
-
-    /// An unguarded version of [`Global::new`].
-    unsafe fn new_unguarded(
-        store: &mut Store,
-        type_: GlobalType,
-        val: UnguardedVal,
-    ) -> Result<Self, GlobalError> {
         match (type_.val, val) {
-            (ValType::I32, UnguardedVal::I32(val)) => Ok(Self(
-                store.insert_global(GlobalEntity::I32(GlobalEntityT::new(type_.mut_, val))),
+            (ValType::I32, Val::I32(val)) => Ok(Self(
+                store.insert_global(GlobalEntity::I32(TypedGlobalEntity::new(type_.mut_, val, store.id()))),
             )),
-            (ValType::I64, UnguardedVal::I64(val)) => Ok(Self(
-                store.insert_global(GlobalEntity::I64(GlobalEntityT::new(type_.mut_, val))),
+            (ValType::I64, Val::I64(val)) => Ok(Self(
+                store.insert_global(GlobalEntity::I64(TypedGlobalEntity::new(type_.mut_, val, store.id()))),
             )),
-            (ValType::F32, UnguardedVal::F32(val)) => Ok(Self(
-                store.insert_global(GlobalEntity::F32(GlobalEntityT::new(type_.mut_, val))),
+            (ValType::F32, Val::F32(val)) => Ok(Self(
+                store.insert_global(GlobalEntity::F32(TypedGlobalEntity::new(type_.mut_, val, store.id()))),
             )),
-            (ValType::F64, UnguardedVal::F64(val)) => Ok(Self(
-                store.insert_global(GlobalEntity::F64(GlobalEntityT::new(type_.mut_, val))),
+            (ValType::F64, Val::F64(val)) => Ok(Self(
+                store.insert_global(GlobalEntity::F64(TypedGlobalEntity::new(type_.mut_, val, store.id()))),
             )),
-            (ValType::FuncRef, UnguardedVal::FuncRef(val)) => Ok(Self(
-                store.insert_global(GlobalEntity::FuncRef(GlobalEntityT::new(type_.mut_, val))),
+            (ValType::FuncRef, Val::FuncRef(val)) => Ok(Self(
+                store.insert_global(GlobalEntity::FuncRef(TypedGlobalEntity::new(type_.mut_, val, store.id()))),
             )),
-            (ValType::ExternRef, UnguardedVal::ExternRef(val)) => Ok(Self(
-                store.insert_global(GlobalEntity::ExternRef(GlobalEntityT::new(type_.mut_, val))),
+            (ValType::ExternRef, Val::ExternRef(val)) => Ok(Self(
+                store.insert_global(GlobalEntity::ExternRef(TypedGlobalEntity::new(type_.mut_, val, store.id()))),
             )),
             _ => Err(GlobalError::ValTypeMismatch),
         }
@@ -92,21 +83,15 @@ impl Global {
 
     /// Returns the value of this [`Global`].
     pub fn get(self, store: &Store) -> Val {
-        unsafe { Val::from_unguarded(self.get_unguarded(store), store.id()) }
-    }
-
-    /// An unguarded version of [`Global::get`].
-    fn get_unguarded(self, store: &Store) -> UnguardedVal {
-        match self.0.as_ref(store) {
-            GlobalEntity::I32(global) => UnguardedVal::I32(global.get()),
-            GlobalEntity::I64(global) => UnguardedVal::I64(global.get()),
-            GlobalEntity::F32(global) => UnguardedVal::F32(global.get()),
-            GlobalEntity::F64(global) => UnguardedVal::F64(global.get()),
-            GlobalEntity::FuncRef(global) => UnguardedVal::FuncRef(global.get()),
-            GlobalEntity::ExternRef(global) => UnguardedVal::ExternRef(global.get()),
+         match self.0.as_ref(store) {
+            GlobalEntity::I32(global) => global.get().into(),
+            GlobalEntity::I64(global) => global.get().into(),
+            GlobalEntity::F32(global) => global.get().into(),
+            GlobalEntity::F64(global) => global.get().into(),
+            GlobalEntity::FuncRef(global) => global.get().into(),
+            GlobalEntity::ExternRef(global) => global.get().into(),
         }
     }
-
     /// Sets the value of this [`Global`] to the given [`Val`].
     ///
     /// # Errors
@@ -118,21 +103,16 @@ impl Global {
     ///
     /// If the given [`Val`] is not owned by the given [`Store`].
     pub fn set(self, store: &mut Store, val: Val) -> Result<(), GlobalError> {
-        unsafe { self.set_unguarded(store, val.to_unguarded(store.id())) }
-    }
-
-    /// An unguarded version of [`Global::set`].
-    unsafe fn set_unguarded(self, store: &mut Store, val: UnguardedVal) -> Result<(), GlobalError> {
         if self.type_(store).mut_ != Mut::Var {
             return Err(GlobalError::Immutable);
         }
         match (self.0.as_mut(store), val) {
-            (GlobalEntity::I32(global), UnguardedVal::I32(val)) => Ok(global.set(val)),
-            (GlobalEntity::I64(global), UnguardedVal::I64(val)) => Ok(global.set(val)),
-            (GlobalEntity::F32(global), UnguardedVal::F32(val)) => Ok(global.set(val)),
-            (GlobalEntity::F64(global), UnguardedVal::F64(val)) => Ok(global.set(val)),
-            (GlobalEntity::FuncRef(global), UnguardedVal::FuncRef(val)) => Ok(global.set(val)),
-            (GlobalEntity::ExternRef(global), UnguardedVal::ExternRef(val)) => Ok(global.set(val)),
+            (GlobalEntity::I32(global), Val::I32(val)) => Ok(global.set(val)),
+            (GlobalEntity::I64(global), Val::I64(val)) => Ok(global.set(val)),
+            (GlobalEntity::F32(global), Val::F32(val)) => Ok(global.set(val)),
+            (GlobalEntity::F64(global), Val::F64(val)) => Ok(global.set(val)),
+            (GlobalEntity::FuncRef(global), Val::FuncRef(val)) => Ok(global.set(val)),
+            (GlobalEntity::ExternRef(global), Val::ExternRef(val)) => Ok(global.set(val)),
             _ => Err(GlobalError::ValTypeMismatch),
         }
     }
@@ -212,48 +192,59 @@ impl Error for GlobalError {}
 /// The representation of a [`Global`] in a [`Store`].
 #[derive(Debug)]
 pub(crate) enum GlobalEntity {
-    I32(GlobalEntityT<i32>),
-    I64(GlobalEntityT<i64>),
-    F32(GlobalEntityT<f32>),
-    F64(GlobalEntityT<f64>),
-    FuncRef(GlobalEntityT<UnguardedFuncRef>),
-    ExternRef(GlobalEntityT<UnguardedExternRef>),
+    I32(TypedGlobalEntity<i32>),
+    I64(TypedGlobalEntity<i64>),
+    F32(TypedGlobalEntity<f32>),
+    F64(TypedGlobalEntity<f64>),
+    FuncRef(TypedGlobalEntity<FuncRef>),
+    ExternRef(TypedGlobalEntity<ExternRef>),
 }
 
 impl GlobalEntity {
     /// Returns a reference to the inner value of this [`GlobalEntity`] if it is a
     /// [`GlobalEntityT<T>`].
-    pub(crate) fn downcast_ref<T>(&self) -> Option<&GlobalEntityT<T>>
+    pub(crate) fn downcast_ref<T>(&self) -> Option<&TypedGlobalEntity<T>>
     where
-        GlobalEntityT<T>: DowncastRef<Self>,
+        T: Guarded,
+        TypedGlobalEntity<T>: DowncastRef<Self>,
     {
-        GlobalEntityT::downcast_ref(self)
+        TypedGlobalEntity::downcast_ref(self)
     }
 
     /// Returns a mutable reference to the inner value of this [`GlobalEntity`] if it is a
     /// [`GlobalEntityT<T>`].
-    pub(crate) fn downcast_mut<T>(&mut self) -> Option<&mut GlobalEntityT<T>>
+    pub(crate) fn downcast_mut<T>(&mut self) -> Option<&mut TypedGlobalEntity<T>>
     where
-        GlobalEntityT<T>: DowncastMut<Self>,
+        T: Guarded,
+        TypedGlobalEntity<T>: DowncastMut<Self>,
     {
-        GlobalEntityT::downcast_mut(self)
+        TypedGlobalEntity::downcast_mut(self)
     }
 }
 
 /// A typed [`GlobalEntity`].
 #[derive(Debug)]
-pub(crate) struct GlobalEntityT<T> {
+pub(crate) struct TypedGlobalEntity<T>
+where
+    T: Guarded
+{
     mut_: Mut,
-    val: T,
+    val: T::Unguarded,
+    guard: T::Guard,
 }
 
-impl<T> GlobalEntityT<T>
+impl<T> TypedGlobalEntity<T>
 where
-    T: Copy,
+    T: Guarded,
 {
     /// Creates a new [`GlobalEntityT`] with the given [`Mut`] and value.
-    fn new(mut_: Mut, val: T) -> Self {
-        Self { mut_, val }
+    fn new(mut_: Mut, val: T, guard: T::Guard) -> Self {
+        let val = val.to_unguarded(guard);
+        unsafe { Self::new_unguarded(mut_, val, guard) }
+    }
+
+    unsafe fn new_unguarded(mut_: Mut, val: T::Unguarded, guard: T::Guard) -> Self {
+        Self { mut_, val, guard }
     }
 
     /// Returns the [`Mut`] of this [`GlobalEntityT`].
@@ -263,17 +254,27 @@ where
 
     /// Returns the value of this [`GlobalEntityT`].
     pub(crate) fn get(&self) -> T {
+        let val = self.get_unguarded();
+        unsafe { T::from_unguarded(val, self.guard) }
+    }
+
+    pub(crate) fn get_unguarded(&self) -> T::Unguarded {
         self.val
     }
 
     /// Sets the value of this [`GlobalEntityT`] to the given value.
     pub(crate) fn set(&mut self, val: T) {
+        let val = val.to_unguarded(self.guard);
+        unsafe { self.set_unguarded(val) }
+    }
+
+    pub(crate) unsafe fn set_unguarded(&mut self, val: T::Unguarded) {
         self.val = val;
     }
 }
 
-impl DowncastRef<GlobalEntity> for GlobalEntityT<i32> {
-    fn downcast_ref(global: &GlobalEntity) -> Option<&GlobalEntityT<i32>> {
+impl DowncastRef<GlobalEntity> for TypedGlobalEntity<i32> {
+    fn downcast_ref(global: &GlobalEntity) -> Option<&TypedGlobalEntity<i32>> {
         match global {
             GlobalEntity::I32(global) => Some(global),
             _ => None,
@@ -281,8 +282,8 @@ impl DowncastRef<GlobalEntity> for GlobalEntityT<i32> {
     }
 }
 
-impl DowncastMut<GlobalEntity> for GlobalEntityT<i32> {
-    fn downcast_mut(global: &mut GlobalEntity) -> Option<&mut GlobalEntityT<i32>> {
+impl DowncastMut<GlobalEntity> for TypedGlobalEntity<i32> {
+    fn downcast_mut(global: &mut GlobalEntity) -> Option<&mut TypedGlobalEntity<i32>> {
         match global {
             GlobalEntity::I32(global) => Some(global),
             _ => None,
@@ -290,8 +291,8 @@ impl DowncastMut<GlobalEntity> for GlobalEntityT<i32> {
     }
 }
 
-impl DowncastRef<GlobalEntity> for GlobalEntityT<i64> {
-    fn downcast_ref(global: &GlobalEntity) -> Option<&GlobalEntityT<i64>> {
+impl DowncastRef<GlobalEntity> for TypedGlobalEntity<i64> {
+    fn downcast_ref(global: &GlobalEntity) -> Option<&TypedGlobalEntity<i64>> {
         match global {
             GlobalEntity::I64(global) => Some(global),
             _ => None,
@@ -299,8 +300,8 @@ impl DowncastRef<GlobalEntity> for GlobalEntityT<i64> {
     }
 }
 
-impl DowncastMut<GlobalEntity> for GlobalEntityT<i64> {
-    fn downcast_mut(global: &mut GlobalEntity) -> Option<&mut GlobalEntityT<i64>> {
+impl DowncastMut<GlobalEntity> for TypedGlobalEntity<i64> {
+    fn downcast_mut(global: &mut GlobalEntity) -> Option<&mut TypedGlobalEntity<i64>> {
         match global {
             GlobalEntity::I64(global) => Some(global),
             _ => None,
@@ -308,8 +309,8 @@ impl DowncastMut<GlobalEntity> for GlobalEntityT<i64> {
     }
 }
 
-impl DowncastRef<GlobalEntity> for GlobalEntityT<f32> {
-    fn downcast_ref(global: &GlobalEntity) -> Option<&GlobalEntityT<f32>> {
+impl DowncastRef<GlobalEntity> for TypedGlobalEntity<f32> {
+    fn downcast_ref(global: &GlobalEntity) -> Option<&TypedGlobalEntity<f32>> {
         match global {
             GlobalEntity::F32(global) => Some(global),
             _ => None,
@@ -317,8 +318,8 @@ impl DowncastRef<GlobalEntity> for GlobalEntityT<f32> {
     }
 }
 
-impl DowncastMut<GlobalEntity> for GlobalEntityT<f32> {
-    fn downcast_mut(global: &mut GlobalEntity) -> Option<&mut GlobalEntityT<f32>> {
+impl DowncastMut<GlobalEntity> for TypedGlobalEntity<f32> {
+    fn downcast_mut(global: &mut GlobalEntity) -> Option<&mut TypedGlobalEntity<f32>> {
         match global {
             GlobalEntity::F32(global) => Some(global),
             _ => None,
@@ -326,8 +327,8 @@ impl DowncastMut<GlobalEntity> for GlobalEntityT<f32> {
     }
 }
 
-impl DowncastRef<GlobalEntity> for GlobalEntityT<f64> {
-    fn downcast_ref(global: &GlobalEntity) -> Option<&GlobalEntityT<f64>> {
+impl DowncastRef<GlobalEntity> for TypedGlobalEntity<f64> {
+    fn downcast_ref(global: &GlobalEntity) -> Option<&TypedGlobalEntity<f64>> {
         match global {
             GlobalEntity::F64(global) => Some(global),
             _ => None,
@@ -335,8 +336,8 @@ impl DowncastRef<GlobalEntity> for GlobalEntityT<f64> {
     }
 }
 
-impl DowncastMut<GlobalEntity> for GlobalEntityT<f64> {
-    fn downcast_mut(global: &mut GlobalEntity) -> Option<&mut GlobalEntityT<f64>> {
+impl DowncastMut<GlobalEntity> for TypedGlobalEntity<f64> {
+    fn downcast_mut(global: &mut GlobalEntity) -> Option<&mut TypedGlobalEntity<f64>> {
         match global {
             GlobalEntity::F64(global) => Some(global),
             _ => None,
@@ -344,8 +345,8 @@ impl DowncastMut<GlobalEntity> for GlobalEntityT<f64> {
     }
 }
 
-impl DowncastRef<GlobalEntity> for GlobalEntityT<UnguardedFuncRef> {
-    fn downcast_ref(global: &GlobalEntity) -> Option<&GlobalEntityT<UnguardedFuncRef>> {
+impl DowncastRef<GlobalEntity> for TypedGlobalEntity<FuncRef> {
+    fn downcast_ref(global: &GlobalEntity) -> Option<&TypedGlobalEntity<FuncRef>> {
         match global {
             GlobalEntity::FuncRef(global) => Some(global),
             _ => None,
@@ -353,8 +354,8 @@ impl DowncastRef<GlobalEntity> for GlobalEntityT<UnguardedFuncRef> {
     }
 }
 
-impl DowncastMut<GlobalEntity> for GlobalEntityT<UnguardedFuncRef> {
-    fn downcast_mut(global: &mut GlobalEntity) -> Option<&mut GlobalEntityT<UnguardedFuncRef>> {
+impl DowncastMut<GlobalEntity> for TypedGlobalEntity<FuncRef> {
+    fn downcast_mut(global: &mut GlobalEntity) -> Option<&mut TypedGlobalEntity<FuncRef>> {
         match global {
             GlobalEntity::FuncRef(global) => Some(global),
             _ => None,
@@ -362,8 +363,8 @@ impl DowncastMut<GlobalEntity> for GlobalEntityT<UnguardedFuncRef> {
     }
 }
 
-impl DowncastRef<GlobalEntity> for GlobalEntityT<UnguardedExternRef> {
-    fn downcast_ref(global: &GlobalEntity) -> Option<&GlobalEntityT<UnguardedExternRef>> {
+impl DowncastRef<GlobalEntity> for TypedGlobalEntity<ExternRef> {
+    fn downcast_ref(global: &GlobalEntity) -> Option<&TypedGlobalEntity<ExternRef>> {
         match global {
             GlobalEntity::ExternRef(global) => Some(global),
             _ => None,
@@ -371,8 +372,8 @@ impl DowncastRef<GlobalEntity> for GlobalEntityT<UnguardedExternRef> {
     }
 }
 
-impl DowncastMut<GlobalEntity> for GlobalEntityT<UnguardedExternRef> {
-    fn downcast_mut(global: &mut GlobalEntity) -> Option<&mut GlobalEntityT<UnguardedExternRef>> {
+impl DowncastMut<GlobalEntity> for TypedGlobalEntity<ExternRef> {
+    fn downcast_mut(global: &mut GlobalEntity) -> Option<&mut TypedGlobalEntity<ExternRef>> {
         match global {
             GlobalEntity::ExternRef(global) => Some(global),
             _ => None,

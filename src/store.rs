@@ -180,6 +180,27 @@ impl InternedFuncType {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct UnguardedInternedFuncType(usize);
 
+macro_rules! impl_guarded_for_prims {
+    ($($T:ty)*) => {
+        $(
+            impl Guarded for $T {
+                type Unguarded = $T;
+                type Guard = StoreGuard;
+
+                unsafe fn from_unguarded(unguarded: Self::Unguarded, _guard: Self::Guard) -> Self {
+                    unguarded
+                }
+
+                fn to_unguarded(self, _guard: Self::Guard) -> Self::Unguarded {
+                    self
+                }
+            }
+        )*
+    }
+}
+
+impl_guarded_for_prims! { i32 i64 f32 f64 }
+
 pub(crate) struct Handle<T> {
     unguarded: UnguardedHandle<T>,
     store_guard: StoreGuard,

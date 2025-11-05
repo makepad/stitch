@@ -11,7 +11,7 @@ use {
         exec,
         exec::{ReadImm, ReadFromReg, ReadFromPtr, ReadReg, ReadStack, ThreadedInstr, WriteReg, WriteStack, WriteToReg, WriteToPtr},
         func::{CompiledFuncBody, Func, FuncEntity, FuncType, InstrSlot, UncompiledFuncBody},
-        global::{GlobalEntity, GlobalEntityT},
+        global::{GlobalEntity, TypedGlobalEntity},
         guarded::Guarded,
         instance::Instance,
         ops::*,
@@ -3344,8 +3344,8 @@ fn select_global_get(type_: ValType) -> ThreadedInstr {
         ValType::I64 => exec::global_get::<i64, WriteStack>,
         ValType::F32 => exec::global_get::<f32, WriteStack>,
         ValType::F64 => exec::global_get::<f64, WriteStack>,
-        ValType::FuncRef => exec::global_get::<UnguardedFuncRef, WriteStack>,
-        ValType::ExternRef => exec::global_get::<UnguardedExternRef, WriteStack>,
+        ValType::FuncRef => exec::global_get::<FuncRef, WriteStack>,
+        ValType::ExternRef => exec::global_get::<ExternRef, WriteStack>,
     }
 }
 
@@ -3355,15 +3355,16 @@ fn select_global_set(type_: ValType, input: OpdKind) -> ThreadedInstr {
         ValType::I64 => select_global_set_inner::<i64>(input),
         ValType::F32 => select_global_set_inner::<f32>(input),
         ValType::F64 => select_global_set_inner::<f64>(input),
-        ValType::FuncRef => select_global_set_inner::<UnguardedFuncRef>(input),
-        ValType::ExternRef => select_global_set_inner::<UnguardedExternRef>(input),
+        ValType::FuncRef => select_global_set_inner::<FuncRef>(input),
+        ValType::ExternRef => select_global_set_inner::<ExternRef>(input),
     }
 }
 
 fn select_global_set_inner<T>(input: OpdKind) -> ThreadedInstr
 where
-    GlobalEntityT<T>: DowncastMut<GlobalEntity>,
-    T: Copy + ReadFromReg
+    T: Guarded,
+    T::Unguarded: ReadFromReg,
+    TypedGlobalEntity<T>: DowncastMut<GlobalEntity>,
 {
     match input {
         OpdKind::Imm => exec::global_set::<T, ReadImm>,
