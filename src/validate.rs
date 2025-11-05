@@ -3,7 +3,7 @@ use {
         instr::{BlockType, InstrDecoder, InstrDecoderAllocs, InstrVisitor, MemArg,},
         decode::DecodeError,
         func::{FuncType, UncompiledFuncBody},
-        global::Mut,
+        runtime::global::Mutability,
         module::ModuleBuilder,
         ops::*,
         ref_::RefType,
@@ -499,16 +499,16 @@ impl<'a> InstrVisitor for Validation<'a> {
 
     fn visit_global_get(&mut self, global_idx: u32) -> Result<(), Self::Error> {
         let type_ = self.module.global(global_idx)?;
-        self.push_opd(type_.val);
+        self.push_opd(type_.content());
         Ok(())
     }
 
     fn visit_global_set(&mut self, global_idx: u32) -> Result<(), Self::Error> {
         let type_ = self.module.global(global_idx)?;
-        if type_.mut_ != Mut::Var {
+        if type_.mutability() != Mutability::Var {
             return Err(DecodeError::new("type mismatch"));
         }
-        self.pop_opd()?.check(type_.val)?;
+        self.pop_opd()?.check(type_.content())?;
         Ok(())
     }
 

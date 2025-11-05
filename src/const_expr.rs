@@ -1,7 +1,7 @@
 use crate::{
     decode::{Decode, DecodeError, Decoder},
     func::Func,
-    global::{Global, Mut},
+    runtime::global::{Global, Mutability},
     module::ModuleBuilder,
     ref_::{Ref, RefType},
     store::Store,
@@ -40,10 +40,10 @@ impl ConstExpr {
             }
             ConstInstr::GlobalGet(global_idx) => {
                 let type_ = module.imported_global(global_idx)?;
-                if type_.mut_ != Mut::Const {
+                if type_.mutability() != Mutability::Const {
                     return Err(DecodeError::new("global is immutable"));
                 }
-                Ok(type_.val)
+                Ok(type_.content())
             }
         }
     }

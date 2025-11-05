@@ -5,85 +5,80 @@ use {
         guarded::Guarded,
         ref_::{ExternRef, FuncRef},
         store::{Handle, Store, StoreGuard, UnguardedHandle},
-        val::{Val, ValType},
+        val::{Val, ValType, ValTypeOf},
     },
     std::{error::Error, fmt},
 };
 
-/// A Wasm global.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+/// A WebAssembly global variable.
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 #[repr(transparent)]
 pub struct Global(pub(crate) Handle<GlobalEntity>);
 
 impl Global {
-    /// Creates a new [`Global`] with the given [`GlobalType`] and initialization [`Val`] in the
-    /// given [`Store`].
+    /// Creates a new [`Global`] with the following parameters:
+    /// 
+    /// * `store` - the [`Store`] in which to create the new [`Global`].
+    /// * `ty` - the [`GlobalType`] of the new [`Global`].
+    /// * `init_val` - the initial [`Val`] of the new [`Global`]'s content.
     ///
     /// # Errors
+    /// 
+    /// If the [`ValType`] of `init_val` does not match that of the new [`Global`]'s content.
+    /// 
+    /// # Panics
     ///
-    /// If the [`ValType`] of the initialiation [`Val`] does not match the [`ValType`] of the
-    /// [`Global`] to be created.
+    /// If `init_val` does not originate from `store`.
+    pub fn new(store: &mut Store, ty: GlobalType, init_val: Val) -> Result<Self, GlobalError> {
+        if init_val.type_() != ty.content() {
+            return Err(GlobalError::TypeMismatch);
+        }
+        let global = match init_val {
+            Val::I32(init_val) => {
+                GlobalEntity::I32(TypedGlobalEntity::new(ty.mutability(), init_val, store.guard()))
+            }
+            Val::I64(init_val) => {
+                GlobalEntity::I64(TypedGlobalEntity::new(ty.mutability(), init_val, store.guard()))
+            }
+            Val::F32(init_val) => {
+                GlobalEntity::F32(TypedGlobalEntity::new(ty.mutability(), init_val, store.guard()))
+            }
+            Val::F64(init_val) => {
+                GlobalEntity::F64(TypedGlobalEntity::new(ty.mutability(), init_val, store.guard()))
+            }
+            Val::FuncRef(init_val) => {
+                GlobalEntity::FuncRef(TypedGlobalEntity::new(ty.mutability(), init_val, store.guard()))
+            }
+            Val::ExternRef(init_val) => {
+                GlobalEntity::ExternRef(TypedGlobalEntity::new(ty.mutability(), init_val, store.guard()))
+            }
+        };
+        Ok(Self(store.insert_global(global)))
+    }
+
+    /// Returns the [`GlobalType`] of `self` in the given `store`.
     ///
     /// # Panics
     ///
-    /// If the initialization [`Val`] is not owned by the given [`Store`].
-    pub fn new(store: &mut Store, type_: GlobalType, val: Val) -> Result<Self, GlobalError> {
-        match (type_.val, val) {
-            (ValType::I32, Val::I32(val)) => Ok(Self(
-                store.insert_global(GlobalEntity::I32(TypedGlobalEntity::new(type_.mut_, val, store.id()))),
-            )),
-            (ValType::I64, Val::I64(val)) => Ok(Self(
-                store.insert_global(GlobalEntity::I64(TypedGlobalEntity::new(type_.mut_, val, store.id()))),
-            )),
-            (ValType::F32, Val::F32(val)) => Ok(Self(
-                store.insert_global(GlobalEntity::F32(TypedGlobalEntity::new(type_.mut_, val, store.id()))),
-            )),
-            (ValType::F64, Val::F64(val)) => Ok(Self(
-                store.insert_global(GlobalEntity::F64(TypedGlobalEntity::new(type_.mut_, val, store.id()))),
-            )),
-            (ValType::FuncRef, Val::FuncRef(val)) => Ok(Self(
-                store.insert_global(GlobalEntity::FuncRef(TypedGlobalEntity::new(type_.mut_, val, store.id()))),
-            )),
-            (ValType::ExternRef, Val::ExternRef(val)) => Ok(Self(
-                store.insert_global(GlobalEntity::ExternRef(TypedGlobalEntity::new(type_.mut_, val, store.id()))),
-            )),
-            _ => Err(GlobalError::ValTypeMismatch),
-        }
-    }
-
-    /// Returns the [`GlobalType`] of this [`Global`].
-    pub fn type_(self, store: &Store) -> GlobalType {
+    /// If `self` does not originate from `store`.
+    pub fn ty(self, store: &Store) -> GlobalType {
         match self.0.as_ref(store) {
-            GlobalEntity::I32(global) => GlobalType {
-                mut_: global.mut_(),
-                val: ValType::I32,
-            },
-            GlobalEntity::I64(global) => GlobalType {
-                mut_: global.mut_(),
-                val: ValType::I64,
-            },
-            GlobalEntity::F32(global) => GlobalType {
-                mut_: global.mut_(),
-                val: ValType::F32,
-            },
-            GlobalEntity::F64(global) => GlobalType {
-                mut_: global.mut_(),
-                val: ValType::F64,
-            },
-            GlobalEntity::FuncRef(global) => GlobalType {
-                mut_: global.mut_(),
-                val: ValType::FuncRef,
-            },
-            GlobalEntity::ExternRef(global) => GlobalType {
-                mut_: global.mut_(),
-                val: ValType::ExternRef,
-            },
+            GlobalEntity::I32(global) => global.ty(),
+            GlobalEntity::I64(global) => global.ty(),
+            GlobalEntity::F32(global) => global.ty(),
+            GlobalEntity::F64(global) => global.ty(),
+            GlobalEntity::FuncRef(global) => global.ty(),
+            GlobalEntity::ExternRef(global) => global.ty(),
         }
     }
 
-    /// Returns the value of this [`Global`].
+    /// Returns the current [`Val`] of `self`'s content in the given `store`.
+    ///
+    /// # Panics
+    ///
+    /// If `self` does not originate from the given [`Store`].
     pub fn get(self, store: &Store) -> Val {
-         match self.0.as_ref(store) {
+        match self.0.as_ref(store) {
             GlobalEntity::I32(global) => global.get().into(),
             GlobalEntity::I64(global) => global.get().into(),
             GlobalEntity::F32(global) => global.get().into(),
@@ -92,28 +87,30 @@ impl Global {
             GlobalEntity::ExternRef(global) => global.get().into(),
         }
     }
-    /// Sets the value of this [`Global`] to the given [`Val`].
+
+    /// Set `self`'s content to `new_val` in the given `store.
     ///
     /// # Errors
     ///
-    /// - If the global is immutable.
-    /// - If the [`ValType`] of the given [`Val`] does not match the [`ValType`] of this [`Global`].
+    /// * If `self` is a constant.
+    /// * If the [`ValType`] of `init_val` does not match that of `self`'s content.
     ///
     /// # Panics
     ///
-    /// If the given [`Val`] is not owned by the given [`Store`].
-    pub fn set(self, store: &mut Store, val: Val) -> Result<(), GlobalError> {
-        if self.type_(store).mut_ != Mut::Var {
+    /// * If `self` does not originate from `store`.
+    /// * If `new_val` does not originate from `store`.
+    pub fn set(self, store: &mut Store, new_val: Val) -> Result<(), GlobalError> {
+        if self.ty(store).mutability() != Mutability::Var {
             return Err(GlobalError::Immutable);
         }
-        match (self.0.as_mut(store), val) {
-            (GlobalEntity::I32(global), Val::I32(val)) => Ok(global.set(val)),
-            (GlobalEntity::I64(global), Val::I64(val)) => Ok(global.set(val)),
-            (GlobalEntity::F32(global), Val::F32(val)) => Ok(global.set(val)),
-            (GlobalEntity::F64(global), Val::F64(val)) => Ok(global.set(val)),
-            (GlobalEntity::FuncRef(global), Val::FuncRef(val)) => Ok(global.set(val)),
-            (GlobalEntity::ExternRef(global), Val::ExternRef(val)) => Ok(global.set(val)),
-            _ => Err(GlobalError::ValTypeMismatch),
+        match (self.0.as_mut(store), new_val) {
+            (GlobalEntity::I32(global), Val::I32(new_val)) => Ok(global.set(new_val)),
+            (GlobalEntity::I64(global), Val::I64(new_val)) => Ok(global.set(new_val)),
+            (GlobalEntity::F32(global), Val::F32(new_val)) => Ok(global.set(new_val)),
+            (GlobalEntity::F64(global), Val::F64(new_val)) => Ok(global.set(new_val)),
+            (GlobalEntity::FuncRef(global), Val::FuncRef(new_val)) => Ok(global.set(new_val)),
+            (GlobalEntity::ExternRef(global), Val::ExternRef(new_val)) => Ok(global.set(new_val)),
+            _ => Err(GlobalError::TypeMismatch),
         }
     }
 }
@@ -131,65 +128,88 @@ impl Guarded for Global {
     }
 }
 
-/// An unguarded version of [`Global`].
+/// An unguarded handle to a [`Global`].
 pub(crate) type UnguardedGlobal = UnguardedHandle<GlobalEntity>;
 
 /// The type of a [`Global`].
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct GlobalType {
-    /// The [`Mut`] of the [`Global`]
-    pub mut_: Mut,
-    /// The [`ValType`] of the [`Global`].
-    pub val: ValType,
+    content: ValType,
+    mutability: Mutability,
+}
+
+impl GlobalType {
+    /// Creates a new [`GlobalType`] with the following parameters:
+    /// 
+    /// * `content` -  the [`ValType`] of the [`Global`]'s content.
+    /// * `mutability` - the [`Mutability`] of the [`Global`].
+    pub fn new(content: ValType, mutability: Mutability) -> Self {
+        Self {
+            content,
+            mutability,
+        }
+    }
+
+    /// Returns the [`ValType`] of the [`Global`]'s content.
+    pub fn content(self) -> ValType {
+        self.content
+    }
+
+    /// Returns the [`Mutability`] of the [`Global`].
+    pub fn mutability(self) -> Mutability {
+        self.mutability
+    }
 }
 
 impl Decode for GlobalType {
     fn decode(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
-        let val = decoder.decode()?;
-        let mut_ = decoder.decode()?;
-        Ok(Self { val, mut_ })
+        Ok(Self {
+            content: decoder.decode()?,
+            mutability: decoder.decode()?,
+        })
     }
 }
 
-/// The mutability of a `Global`.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum Mut {
-    /// The global is a constant.
+/// The mutability of a [`Global`].
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum Mutability {
+    /// The [`Global`] is a constant.
     Const,
-    /// The global is a variable.
+    /// The [`Global`] is a variable.
     Var,
 }
 
-impl Decode for Mut {
+impl Decode for Mutability {
     fn decode(decoder: &mut Decoder<'_>) -> Result<Self, DecodeError> {
         match decoder.read_byte()? {
             0x00 => Ok(Self::Const),
             0x01 => Ok(Self::Var),
-            _ => Err(DecodeError::new("malformed mutability")),
+            _ => Err(DecodeError::new("invalid mutability")),
         }
     }
 }
 
-/// An error which can occur when operating on a [`Global`].
+/// An error returned by operations on a [`Global`].
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
 pub enum GlobalError {
+    /// The [`Global`] is immutable.
     Immutable,
-    ValTypeMismatch,
+    /// The [`ValType`] does not match that of the [`Global`]'s content.
+    TypeMismatch,
 }
 
 impl fmt::Display for GlobalError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             GlobalError::Immutable => write!(f, "global is immutable"),
-            GlobalError::ValTypeMismatch => write!(f, "value type mismatch"),
+            GlobalError::TypeMismatch => write!(f, "type does not match that of global's content"),
         }
     }
 }
 
 impl Error for GlobalError {}
 
-/// The representation of a [`Global`] in a [`Store`].
 #[derive(Debug)]
 pub(crate) enum GlobalEntity {
     I32(TypedGlobalEntity<i32>),
@@ -201,8 +221,6 @@ pub(crate) enum GlobalEntity {
 }
 
 impl GlobalEntity {
-    /// Returns a reference to the inner value of this [`GlobalEntity`] if it is a
-    /// [`GlobalEntityT<T>`].
     pub(crate) fn downcast_ref<T>(&self) -> Option<&TypedGlobalEntity<T>>
     where
         T: Guarded,
@@ -211,8 +229,6 @@ impl GlobalEntity {
         TypedGlobalEntity::downcast_ref(self)
     }
 
-    /// Returns a mutable reference to the inner value of this [`GlobalEntity`] if it is a
-    /// [`GlobalEntityT<T>`].
     pub(crate) fn downcast_mut<T>(&mut self) -> Option<&mut TypedGlobalEntity<T>>
     where
         T: Guarded,
@@ -222,14 +238,13 @@ impl GlobalEntity {
     }
 }
 
-/// A typed [`GlobalEntity`].
 #[derive(Debug)]
 pub(crate) struct TypedGlobalEntity<T>
 where
-    T: Guarded
+    T: Guarded,
 {
-    mut_: Mut,
-    val: T::Unguarded,
+    content: T::Unguarded,
+    mutability: Mutability,
     guard: T::Guard,
 }
 
@@ -237,39 +252,44 @@ impl<T> TypedGlobalEntity<T>
 where
     T: Guarded,
 {
-    /// Creates a new [`GlobalEntityT`] with the given [`Mut`] and value.
-    fn new(mut_: Mut, val: T, guard: T::Guard) -> Self {
-        let val = val.to_unguarded(guard);
-        unsafe { Self::new_unguarded(mut_, val, guard) }
+    fn new(mutability: Mutability, init_val: T, guard: T::Guard) -> Self {
+        let init_val = init_val.to_unguarded(guard);
+        unsafe { Self::new_unguarded(mutability, init_val, guard) }
     }
 
-    unsafe fn new_unguarded(mut_: Mut, val: T::Unguarded, guard: T::Guard) -> Self {
-        Self { mut_, val, guard }
+    unsafe fn new_unguarded(mutability: Mutability, val: T::Unguarded, guard: T::Guard) -> Self {
+        Self {
+            mutability,
+            content: val,
+            guard,
+        }
     }
 
-    /// Returns the [`Mut`] of this [`GlobalEntityT`].
-    fn mut_(&self) -> Mut {
-        self.mut_
-    }
-
-    /// Returns the value of this [`GlobalEntityT`].
-    pub(crate) fn get(&self) -> T {
+    fn get(&self) -> T {
         let val = self.get_unguarded();
         unsafe { T::from_unguarded(val, self.guard) }
     }
 
     pub(crate) fn get_unguarded(&self) -> T::Unguarded {
-        self.val
+        self.content
     }
 
-    /// Sets the value of this [`GlobalEntityT`] to the given value.
-    pub(crate) fn set(&mut self, val: T) {
-        let val = val.to_unguarded(self.guard);
-        unsafe { self.set_unguarded(val) }
+    fn set(&mut self, new_val: T) {
+        let new_val = new_val.to_unguarded(self.guard);
+        unsafe { self.set_unguarded(new_val) }
     }
 
-    pub(crate) unsafe fn set_unguarded(&mut self, val: T::Unguarded) {
-        self.val = val;
+    pub(crate) unsafe fn set_unguarded(&mut self, new_val: T::Unguarded) {
+        self.content = new_val;
+    }
+}
+
+impl<T> TypedGlobalEntity<T>
+where
+    T: Guarded + ValTypeOf,
+{
+    fn ty(&self) -> GlobalType {
+        GlobalType::new(T::val_type_of(), self.mutability)
     }
 }
 

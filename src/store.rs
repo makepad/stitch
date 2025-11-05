@@ -6,7 +6,7 @@ use {
         engine::Engine,
         extern_::ExternEntity,
         func::{FuncEntity, FuncType},
-        global::GlobalEntity,
+        runtime::global::GlobalEntity,
         guarded::Guarded,
         mem::MemEntity,
         table::TableEntity,
@@ -55,7 +55,7 @@ impl Store {
         &self.engine
     }
 
-    pub(crate) fn id(&self) -> StoreGuard {
+    pub(crate) fn guard(&self) -> StoreGuard {
         self.id
     }
 
@@ -283,8 +283,8 @@ pub(crate) struct HandlePair<T, U>(pub(crate) Handle<T>, pub(crate) Handle<U>);
 
 impl<T, U> HandlePair<T, U> {
     pub(crate) fn as_mut_pair(mut self, store: &Store) -> (&mut T, &mut U) {
-        assert_eq!(store.id(), self.0.store_guard, "store mismatch");
-        assert_eq!(store.id(), self.1.store_guard, "store mismatch");
+        assert_eq!(store.guard(), self.0.store_guard, "store mismatch");
+        assert_eq!(store.guard(), self.1.store_guard, "store mismatch");
         assert_ne!(
             self.0.unguarded.as_ptr() as usize,
             self.1.unguarded.as_ptr() as usize,

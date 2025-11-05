@@ -82,7 +82,7 @@ macro_rules! impl_into_fund {
                     HostFuncTrampoline::new(move |caller: Caller| -> Result<(), Error> {
                         let ($($Ti,)*) = unsafe {
                             let mut ptr = caller.stack.as_mut_ptr().add(caller.stack.len() - call_frame_size);
-                            Self::Params::read_from_stack(&mut ptr, caller.store.id())
+                            Self::Params::read_from_stack(&mut ptr, caller.store.guard())
                         };
                         let results = self(Caller {
                             store: &mut *caller.store,
@@ -90,7 +90,7 @@ macro_rules! impl_into_fund {
                         }, $($Ti,)*).into_result()?;
                         unsafe {
                             let mut ptr = caller.stack.as_mut_ptr().add(caller.stack.len() - call_frame_size);
-                            results.write_to_stack(&mut ptr, caller.store.id())
+                            results.write_to_stack(&mut ptr, caller.store.guard())
                         }
                         Ok(())
                     })

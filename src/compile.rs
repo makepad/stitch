@@ -11,7 +11,7 @@ use {
         exec,
         exec::{ReadImm, ReadFromReg, ReadFromPtr, ReadReg, ReadStack, ThreadedInstr, WriteReg, WriteStack, WriteToReg, WriteToPtr},
         func::{CompiledFuncBody, Func, FuncEntity, FuncType, InstrSlot, UncompiledFuncBody},
-        global::{GlobalEntity, TypedGlobalEntity},
+        runtime::global::{GlobalEntity, TypedGlobalEntity},
         guarded::Guarded,
         instance::Instance,
         ops::*,
@@ -98,12 +98,12 @@ impl Compiler {
         );
 
         compile.emit_instr(exec::enter as ThreadedInstr);
-        compile.emit(func.to_unguarded(store.id()));
+        compile.emit(func.to_unguarded(store.guard()));
         compile.emit(
             compile
                 .instance
                 .mem(0)
-                .map(|mem| mem.to_unguarded(store.id())),
+                .map(|mem| mem.to_unguarded(store.guard())),
         );
 
         while !compile.instr_stream.is_empty() {
@@ -1405,7 +1405,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit an unguarded handle to the [`Func`] to be called.
-        self.emit(func.0.to_unguarded(self.store.id()));
+        self.emit(func.0.to_unguarded(self.store.guard()));
 
         // Compute the start and end of the call frame, and update the maximum stack height
         // attained by the [`Func`] being compiled.
@@ -1420,7 +1420,7 @@ impl<'a> InstrVisitor for Compile<'a> {
             self.emit(
                 self.instance
                     .mem(0)
-                    .map(|mem| mem.0.to_unguarded(self.store.id())),
+                    .map(|mem| mem.0.to_unguarded(self.store.guard())),
             );
         }
 
@@ -1469,10 +1469,10 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit an unguarded handle to the [`Table`].
-        self.emit(table.0.to_unguarded(self.store.id()));
+        self.emit(table.0.to_unguarded(self.store.guard()));
 
         // Emit the interned type.
-        self.emit(interned_type.to_unguarded(self.store.id()));
+        self.emit(interned_type.to_unguarded(self.store.guard()));
 
         // Compute the start and end of the call frame, and update the maximum stack height
         // attained by the [`Func`] being compiled.
@@ -1487,7 +1487,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit(
             self.instance
                 .mem(0)
-                .map(|mem| mem.0.to_unguarded(self.store.id())),
+                .map(|mem| mem.0.to_unguarded(self.store.guard())),
         );
 
         // Push the outputs onto the stack.
@@ -1511,8 +1511,8 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit_instr(select_ref_null(type_));
 
         match type_ {
-            RefType::FuncRef => self.emit(FuncRef::None.to_unguarded(self.store.id())),
-            RefType::ExternRef => self.emit(ExternRef::None.to_unguarded(self.store.id())),
+            RefType::FuncRef => self.emit(FuncRef::None.to_unguarded(self.store.guard())),
+            RefType::ExternRef => self.emit(ExternRef::None.to_unguarded(self.store.guard())),
         };
 
         // Push the output onto the stack and emit its stack offset.
@@ -1559,7 +1559,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit_instr(exec::copy::<UnguardedFuncRef, ReadImm, WriteStack> as ThreadedInstr);
         
         // Emit an unguarded handle to the [`Func`].
-        self.emit(func.to_unguarded(self.store.id()));
+        self.emit(func.to_unguarded(self.store.guard()));
 
         // Push the output onto the stack and emit its stack offset.
         self.push_opd(ValType::FuncRef);
@@ -1681,13 +1681,13 @@ impl<'a> InstrVisitor for Compile<'a> {
         let global = self.instance.global(global_idx).unwrap();
 
         // Obtain the type of the [`Global`].
-        let val_type = global.type_(&self.store).val;
+        let val_type = global.ty(&self.store).content();
 
         // Emit the instruction.
         self.emit_instr(select_global_get(val_type));
 
         // Emit an unguarded handle to the [`Global`].
-        self.emit(global.to_unguarded(self.store.id()));
+        self.emit(global.to_unguarded(self.store.guard()));
 
         // Push the output onto the stack and emit its stack offset.
         self.push_opd(val_type);
@@ -1707,7 +1707,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         let global = self.instance.global(global_idx).unwrap();
 
         // Obtain the type of the [`Global`].
-        let val_type = global.type_(&self.store).val;
+        let val_type = global.ty(&self.store).content();
 
         // Emit the instruction.
         self.emit_instr(select_global_set(val_type, self.opd(0).kind()));
@@ -1717,7 +1717,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.pop_opd();
 
         // Emit an unguarded handle to the [`Global`].
-        self.emit(global.to_unguarded(self.store.id()));
+        self.emit(global.to_unguarded(self.store.guard()));
 
         Ok(())
     }
@@ -1745,7 +1745,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.pop_opd();
 
         // Emit an unguarded handle to the [`Table`].
-        self.emit(table.to_unguarded(self.store.id()));
+        self.emit(table.to_unguarded(self.store.guard()));
 
         // Push the output onto the stack and emit its stack offset.
         self.push_opd(ValType::I32);
@@ -1780,7 +1780,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit an unguarded handle to the [`Table`].
-        self.emit(table.to_unguarded(self.store.id()));
+        self.emit(table.to_unguarded(self.store.guard()));
 
         Ok(())
     }
@@ -1802,7 +1802,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit_instr(select_table_size(elem_type));
 
         // Emit an unguarded handle to the [`Table`].
-        self.emit(table.to_unguarded(self.store.id()));
+        self.emit(table.to_unguarded(self.store.guard()));
 
         // Push the output onto the stack and emit its stack offset.
         self.push_opd(ValType::I32);
@@ -1842,7 +1842,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit an unguarded handle to the [`Table`].
-        self.emit(table.to_unguarded(self.store.id()));
+        self.emit(table.to_unguarded(self.store.guard()));
 
         // Push the output onto the stack and emit its stack offset.
         self.push_opd(ValType::I32);
@@ -1882,7 +1882,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit an unguarded handle to the [`Table`].
-        self.emit(table.to_unguarded(self.store.id()));
+        self.emit(table.to_unguarded(self.store.guard()));
 
         Ok(())
     }
@@ -1923,8 +1923,8 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit unguarded handles to the destination and source [`Table`].
-        self.emit(dst_table.to_unguarded(self.store.id()));
-        self.emit(src_table.to_unguarded(self.store.id()));
+        self.emit(dst_table.to_unguarded(self.store.guard()));
+        self.emit(src_table.to_unguarded(self.store.guard()));
 
         Ok(())
     }
@@ -1965,8 +1965,8 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit unguarded handles to the destination [`Table`] and source [`Elem`].
-        self.emit(dst_table.0.to_unguarded(self.store.id()));
-        self.emit(src_elem.0.to_unguarded(self.store.id()));
+        self.emit(dst_table.0.to_unguarded(self.store.guard()));
+        self.emit(src_elem.0.to_unguarded(self.store.guard()));
 
         Ok(())
     }
@@ -1988,7 +1988,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit_instr(select_elem_drop(elem_type));
 
         // Emit an unguarded handle to the [`Elem`].
-        self.emit(elem.to_unguarded(self.store.id()));
+        self.emit(elem.to_unguarded(self.store.guard()));
 
         Ok(())
     }
@@ -2104,7 +2104,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit_instr(exec::memory_size::<WriteStack> as ThreadedInstr);
 
         // Emit an unguarded handle to the [`Mem`].
-        self.emit(mem.to_unguarded(self.store.id()));
+        self.emit(mem.to_unguarded(self.store.guard()));
 
         // Push the output onto the stack and emit its stack offset.
         self.push_opd(ValType::I32);
@@ -2138,7 +2138,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit_and_pop_opd();
 
         // Emit an unguarded handle to the memory instance.
-        self.emit(mem.to_unguarded(self.store.id()));
+        self.emit(mem.to_unguarded(self.store.guard()));
 
         // Push the output onto the stack and emit its stack offset.
         self.push_opd(ValType::I32);
@@ -2177,7 +2177,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit an unguarded handle to the [`Mem`].
-        self.emit(mem.to_unguarded(self.store.id()));
+        self.emit(mem.to_unguarded(self.store.guard()));
 
         Ok(())
     }
@@ -2212,7 +2212,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit an unguarded handle to the [`Mem`].
-        self.emit(mem.to_unguarded(self.store.id()));
+        self.emit(mem.to_unguarded(self.store.guard()));
 
         Ok(())
     }
@@ -2248,8 +2248,8 @@ impl<'a> InstrVisitor for Compile<'a> {
         }
 
         // Emit unguarded handles to the destination [`Mem`] and source [`Data`] instance.
-        self.emit(dst_mem.to_unguarded(self.store.id()));
-        self.emit(src_data.to_unguarded(self.store.id()));
+        self.emit(dst_mem.to_unguarded(self.store.guard()));
+        self.emit(src_data.to_unguarded(self.store.guard()));
 
         Ok(())
     }
@@ -2268,7 +2268,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         self.emit_instr(exec::data_drop as ThreadedInstr);
 
         // Emit an unguarded handle to the [`Data`].
-        self.emit(data.to_unguarded(self.store.id()));
+        self.emit(data.to_unguarded(self.store.guard()));
 
         Ok(())
     }

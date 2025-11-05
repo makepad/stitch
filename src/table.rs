@@ -37,10 +37,10 @@ impl Table {
     ) -> Result<Self, TableError> {
         match (type_.elem, val) {
             (RefType::FuncRef, Ref::FuncRef(val)) => Ok(Self(
-                store.insert_table(TableEntity::FuncRef(TypedTableEntity::new(type_.limits, val, store.id()))),
+                store.insert_table(TableEntity::FuncRef(TypedTableEntity::new(type_.limits, val, store.guard()))),
             )),
             (RefType::ExternRef, Ref::ExternRef(val)) => Ok(Self(
-                store.insert_table(TableEntity::ExternRef(TypedTableEntity::new(type_.limits, val, store.id()))),
+                store.insert_table(TableEntity::ExternRef(TypedTableEntity::new(type_.limits, val, store.guard()))),
             )),
             _ => Err(TableError::ElemTypeMismatch),
         }
@@ -108,7 +108,7 @@ impl Table {
     ///
     /// - If the given initialization [`Ref`] is not owned by the given [`Store`].
     pub fn grow(self, store: &mut Store, val: Ref, count: u32) -> Result<(), TableError> {
-        unsafe { self.grow_unguarded(store, val.to_unguarded(store.id()), count) }
+        unsafe { self.grow_unguarded(store, val.to_unguarded(store.guard()), count) }
     }
 
     /// An unguarded version of [`Table::grow`].

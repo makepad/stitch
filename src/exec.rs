@@ -10,7 +10,7 @@ use {
         error::Error,
         extern_::UnguardedExtern,
         func::{Caller, Func, FuncBody, FuncEntity, FuncType, InstrSlot, UnguardedFunc},
-        global::{GlobalEntity, TypedGlobalEntity, UnguardedGlobal},
+        runtime::global::{GlobalEntity, TypedGlobalEntity, UnguardedGlobal},
         guarded::Guarded,
         mem::UnguardedMem,
         ops::*,
@@ -174,7 +174,7 @@ pub(crate) fn exec(
     let mut ptr = unsafe { stack.as_mut_ptr().add(stack.len()) };
     for arg in args.iter().copied() {
         unsafe {
-            arg.to_unguarded(store.id()).write_to_ptr(ptr);
+            arg.to_unguarded(store.guard()).write_to_ptr(ptr);
             ptr = ptr.add(arg.type_().padded_size_of());
         };
     }
@@ -278,7 +278,7 @@ pub(crate) fn exec(
         unsafe {
             *result = Val::from_unguarded(
                 UnguardedVal::read_from_ptr(ptr, result.type_()),
-                store.id(),
+                store.guard(),
             );
             ptr = ptr.add(result.type_().padded_size_of());
         }
@@ -600,12 +600,12 @@ pub(crate) unsafe extern "C" fn call_indirect(
         if func
             .as_ref()
             .type_()
-            .to_unguarded((*(*cx).store).id())
+            .to_unguarded((*(*cx).store).guard())
             != type_
         {
             return ControlFlow::Trap(Trap::TypeMismatch).to_bits();
         }
-        let id = (*(*args.cx).store).id();
+        let id = (*(*args.cx).store).guard();
         Func(Handle::from_unguarded(func, id)).compile(&mut *(*args.cx).store);
         match func.as_mut() {
             FuncEntity::Wasm(func) => {
@@ -1355,7 +1355,7 @@ pub(crate) unsafe extern "C" fn compile(
         let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
         args.align_ip(align_of::<UnguardedFuncRef>());
         let mut func = ptr::read(args.ip().cast());
-        Func(Handle::from_unguarded(func, (*(*cx).store).id())).compile((*cx).store);
+        Func(Handle::from_unguarded(func, (*(*cx).store).guard())).compile((*cx).store);
         let FuncEntity::Wasm(func) = func.as_mut() else {
             hint::unreachable_unchecked();
         };

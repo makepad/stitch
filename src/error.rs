@@ -1,6 +1,6 @@
 use {
     crate::{
-        decode::DecodeError, func::FuncError, global::GlobalError, linker::InstantiateError,
+        decode::DecodeError, func::FuncError, runtime::global::GlobalError, linker::InstantiateError,
         mem::MemError, table::TableError, trap::Trap,
     },
     std::{error, fmt},

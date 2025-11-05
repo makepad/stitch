@@ -1,7 +1,7 @@
 use crate::{
     decode::{Decode, DecodeError, Decoder},
     func::{Func, FuncType, UnguardedFunc},
-    global::{Global, GlobalType, UnguardedGlobal},
+    runtime::global::{Global, GlobalType, UnguardedGlobal},
     guarded::Guarded,
     mem::{Mem, MemType, UnguardedMem},
     store::{Store, StoreGuard},
@@ -9,7 +9,7 @@ use crate::{
 };
 
 /// A Wasm entity that can be imported or exported.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExternVal {
     Func(Func),
     Table(Table),
@@ -24,7 +24,7 @@ impl ExternVal {
             Self::Func(func) => ExternType::Func(func.type_(store).clone()),
             Self::Table(table) => ExternType::Table(table.type_(store)),
             Self::Memory(mem) => ExternType::Mem(mem.type_(store)),
-            Self::Global(global) => ExternType::Global(global.type_(store)),
+            Self::Global(global) => ExternType::Global(global.ty(store)),
         }
     }
 
@@ -185,7 +185,7 @@ impl Decode for ExternValDesc {
 }
 
 /// The type of an [`ExternVal`].
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExternType {
     Func(FuncType),
     Table(TableType),

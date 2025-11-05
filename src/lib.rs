@@ -15,7 +15,6 @@ mod exec;
 mod extern_;
 mod extern_val;
 mod func;
-mod global;
 mod guarded;
 mod instance;
 mod into_func;
@@ -25,6 +24,7 @@ mod mem;
 mod module;
 mod ops;
 mod ref_;
+mod runtime;
 mod stack;
 mod store;
 mod table;
@@ -39,7 +39,7 @@ pub use self::{
     extern_::Extern,
     extern_val::{ExternType, ExternVal},
     func::{Func, FuncError, FuncType},
-    global::{Global, GlobalError, GlobalType, Mut},
+    runtime::global::{Global, GlobalError, GlobalType, Mutability},
     instance::{Instance, InstanceExports},
     limits::Limits,
     linker::{InstantiateError, Linker},

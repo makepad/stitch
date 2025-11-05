@@ -9,7 +9,7 @@ use {
         error::Error,
         extern_val::{ExternType, ExternTypeDesc, ExternVal, ExternValDesc},
         func::{UncompiledFuncBody, Func, FuncType},
-        global::{Global, GlobalType},
+        runtime::global::{Global, GlobalType},
         guarded::Guarded,
         instance::{Instance, InstanceIniter},
         linker::{InstantiateError, Linker},
@@ -194,8 +194,8 @@ impl Module {
         store: &mut Store,
         linker: &Linker,
     ) -> Result<Instance, Error> {
-        let instance = Instance::uninited(store.id());
-        let mut initer = InstanceIniter::new(store.id());
+        let instance = Instance::uninited(store.guard());
+        let mut initer = InstanceIniter::new(store.guard());
         for type_ in self.types.iter() {
             initer.push_type(store.get_or_intern_type(type_));
         }
@@ -218,7 +218,7 @@ impl Module {
                     let global = val
                         .to_global()
                         .ok_or(InstantiateError::ImportKindMismatch)?;
-                    if global.type_(store) != type_ {
+                    if global.ty(store) != type_ {
                         return Err(InstantiateError::GlobalTypeMismatch)?;
                     }
                     initer.push_global(global);
@@ -232,7 +232,7 @@ impl Module {
         }
         let global_init_vals: Vec<_> = self
             .internal_globals()
-            .map(|(_, val)| val.evaluate(store, &initer))
+            .map(|(_, val)| val.evaluate(&store, &initer))
             .collect();
         let elems: Vec<UnguardedElems> = self
             .elems
@@ -242,10 +242,10 @@ impl Module {
                     elem.elems
                         .iter()
                         .map(|elem| {
-                            elem.evaluate(store, &initer)
+                            elem.evaluate(&store, &initer)
                                 .to_func_ref()
                                 .unwrap()
-                                .to_unguarded(store.id())
+                                .to_unguarded(store.guard())
                         })
                         .collect(),
                 ),
@@ -256,7 +256,7 @@ impl Module {
                             elem.evaluate(store, &initer)
                                 .to_extern_ref()
                                 .unwrap()
-                                .to_unguarded(store.id())
+                                .to_unguarded(store.guard())
                         })
                         .collect(),
                 ),
@@ -294,7 +294,7 @@ impl Module {
             initer.push_mem(Mem::new(store, type_));
         }
         for ((type_, _), init_val) in self.internal_globals().zip(global_init_vals) {
-            initer.push_global(Global::new(store, type_, init_val).unwrap());
+            initer.push_global(Global::new(store, type_, init_val)?);
         }
         for (name, &desc) in self.exports.iter() {
             initer.push_export(
@@ -681,7 +681,7 @@ impl ModuleBuilder {
         if self.global_types.len() == config::MAX_GLOBAL_COUNT {
             return Err(DecodeError::new("too many globals"));
         }
-        if global.val.validate(self)? != global.type_.val {
+        if global.val.validate(self)? != global.type_.content() {
             return Err(DecodeError::new("type mismatch"));
         }
         if let Some(func_idx) = global.val.func_idx() {

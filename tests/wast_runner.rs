@@ -1,7 +1,8 @@
 use {
     makepad_stitch::{
-        Engine, Error, Extern, ExternRef, Func, FuncRef, Global, GlobalType, Instance, Limits, Linker, Mem,
-        MemType, Module, Mut, Ref, RefType, Store, Table, TableType, Val, ValType,
+        Engine, Error, Extern, ExternRef, Func, FuncRef, Global, GlobalType, Instance, Limits,
+        Linker, Mem, MemType, Module, Mutability, Ref, RefType, Store, Table, TableType, Val,
+        ValType,
     },
     std::{collections::HashMap, sync::Arc},
     wast::{
@@ -68,40 +69,24 @@ impl WastRunner {
         );
         let global_i32 = Global::new(
             &mut store,
-            GlobalType {
-                mut_: Mut::Const,
-                val: ValType::I32,
-            },
+            GlobalType::new(ValType::I32, Mutability::Const),
             Val::I32(666),
-        )
-        .unwrap();
+        ).unwrap();
         let global_i64 = Global::new(
             &mut store,
-            GlobalType {
-                mut_: Mut::Const,
-                val: ValType::I64,
-            },
+            GlobalType::new(ValType::I64, Mutability::Const),
             Val::I64(666),
-        )
-        .unwrap();
+        ).unwrap();
         let global_f32 = Global::new(
             &mut store,
-            GlobalType {
-                mut_: Mut::Const,
-                val: ValType::F32,
-            },
+            GlobalType::new(ValType::F32, Mutability::Const),
             Val::F32(666.6),
-        )
-        .unwrap();
+        ).unwrap();
         let global_f64 = Global::new(
             &mut store,
-            GlobalType {
-                mut_: Mut::Const,
-                val: ValType::F64,
-            },
+            GlobalType::new(ValType::F64, Mutability::Const),
             Val::F64(666.6),
-        )
-        .unwrap();
+        ).unwrap();
         linker.define("spectest", "print", print);
         linker.define("spectest", "print_i32", print_i32);
         linker.define("spectest", "print_i64", print_i64);
