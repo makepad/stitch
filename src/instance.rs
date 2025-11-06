@@ -5,11 +5,13 @@ use {
         elem::{Elem, UnguardedElem},
         extern_val::{ExternVal, UnguardedExternVal},
         func::{Func, UnguardedFunc},
-        runtime::global::{Global, UnguardedGlobal},
+        runtime::{
+            global::{Global, UnguardedGlobal},
+            table::{Table, UnguardedTable},
+        },
         guarded::Guarded,
         mem::{Mem, UnguardedMem},
         store::{InternedFuncType, StoreGuard, UnguardedInternedFuncType},
-        table::{Table, UnguardedTable},
     },
     std::{
         cell::OnceCell,

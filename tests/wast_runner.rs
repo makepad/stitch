@@ -48,13 +48,11 @@ impl WastRunner {
         });
         let table = Table::new(
             &mut store,
-            TableType {
-                limits: Limits {
-                    min: 10,
-                    max: Some(20),
-                },
-                elem: RefType::FuncRef,
-            },
+            TableType::new(
+                RefType::FuncRef,
+                10,
+                Some(20),
+            ),
             Ref::null(RefType::FuncRef),
         )
         .unwrap();

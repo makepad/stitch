@@ -20,7 +20,7 @@ impl Global {
     /// 
     /// * `store` - the [`Store`] in which to create the new [`Global`].
     /// * `ty` - the [`GlobalType`] of the new [`Global`].
-    /// * `init_val` - the initial [`Val`] of the new [`Global`]'s content.
+    /// * `init_val` - the initial value of the new [`Global`]'s content.
     ///
     /// # Errors
     /// 
@@ -35,22 +35,22 @@ impl Global {
         }
         let global = match init_val {
             Val::I32(init_val) => {
-                GlobalEntity::I32(TypedGlobalEntity::new(ty.mutability(), init_val, store.guard()))
+                GlobalEntity::I32(TypedGlobalEntity::new(init_val, ty.mutability(), store.guard()))
             }
             Val::I64(init_val) => {
-                GlobalEntity::I64(TypedGlobalEntity::new(ty.mutability(), init_val, store.guard()))
+                GlobalEntity::I64(TypedGlobalEntity::new(init_val, ty.mutability(), store.guard()))
             }
             Val::F32(init_val) => {
-                GlobalEntity::F32(TypedGlobalEntity::new(ty.mutability(), init_val, store.guard()))
+                GlobalEntity::F32(TypedGlobalEntity::new(init_val, ty.mutability(), store.guard()))
             }
             Val::F64(init_val) => {
-                GlobalEntity::F64(TypedGlobalEntity::new(ty.mutability(), init_val, store.guard()))
+                GlobalEntity::F64(TypedGlobalEntity::new(init_val, ty.mutability(), store.guard()))
             }
             Val::FuncRef(init_val) => {
-                GlobalEntity::FuncRef(TypedGlobalEntity::new(ty.mutability(), init_val, store.guard()))
+                GlobalEntity::FuncRef(TypedGlobalEntity::new(init_val, ty.mutability(), store.guard()))
             }
             Val::ExternRef(init_val) => {
-                GlobalEntity::ExternRef(TypedGlobalEntity::new(ty.mutability(), init_val, store.guard()))
+                GlobalEntity::ExternRef(TypedGlobalEntity::new(init_val, ty.mutability(), store.guard()))
             }
         };
         Ok(Self(store.insert_global(global)))
@@ -72,11 +72,11 @@ impl Global {
         }
     }
 
-    /// Returns the current [`Val`] of `self`'s content in the given `store`.
+    /// Returns the current value of `self`'s content in the given `store`.
     ///
     /// # Panics
     ///
-    /// If `self` does not originate from the given [`Store`].
+    /// If `self` does not originate from [`Store`].
     pub fn get(self, store: &Store) -> Val {
         match self.0.as_ref(store) {
             GlobalEntity::I32(global) => global.get().into(),
@@ -88,12 +88,12 @@ impl Global {
         }
     }
 
-    /// Set `self`'s content to `new_val` in the given `store.
+    /// Sets the value of `self`'s content to `new_val` in the given `store`.
     ///
     /// # Errors
     ///
     /// * If `self` is a constant.
-    /// * If the [`ValType`] of `init_val` does not match that of `self`'s content.
+    /// * If the [`ValType`] of `new_val` does not match that of `self`'s content.
     ///
     /// # Panics
     ///
@@ -190,7 +190,7 @@ impl Decode for Mutability {
 }
 
 /// An error returned by operations on a [`Global`].
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum GlobalError {
     /// The [`Global`] is immutable.
@@ -252,15 +252,15 @@ impl<T> TypedGlobalEntity<T>
 where
     T: Guarded,
 {
-    fn new(mutability: Mutability, init_val: T, guard: T::Guard) -> Self {
+    fn new(init_val: T, mutability: Mutability, guard: T::Guard) -> Self {
         let init_val = init_val.to_unguarded(guard);
-        unsafe { Self::new_unguarded(mutability, init_val, guard) }
+        unsafe { Self::new_unguarded(init_val, mutability, guard) }
     }
 
-    unsafe fn new_unguarded(mutability: Mutability, val: T::Unguarded, guard: T::Guard) -> Self {
+    unsafe fn new_unguarded(val: T::Unguarded, mutability: Mutability, guard: T::Guard) -> Self {
         Self {
-            mutability,
             content: val,
+            mutability,
             guard,
         }
     }

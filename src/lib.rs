@@ -27,7 +27,6 @@ mod ref_;
 mod runtime;
 mod stack;
 mod store;
-mod table;
 mod trap;
 mod val;
 mod validate;
@@ -39,7 +38,10 @@ pub use self::{
     extern_::Extern,
     extern_val::{ExternType, ExternVal},
     func::{Func, FuncError, FuncType},
-    runtime::global::{Global, GlobalError, GlobalType, Mutability},
+    runtime::{
+        global::{Global, GlobalError, GlobalType, Mutability},
+        table::{Table, TableError, TableType},
+    },
     instance::{Instance, InstanceExports},
     limits::Limits,
     linker::{InstantiateError, Linker},
@@ -47,6 +49,5 @@ pub use self::{
     module::{Module, ModuleExports, ModuleImports},
     ref_::{ExternRef, FuncRef, Ref, RefType},
     store::Store,
-    table::{Table, TableError, TableType},
     val::{Val, ValType},
 };

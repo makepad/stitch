@@ -11,13 +11,15 @@ use {
         exec,
         exec::{ReadImm, ReadFromReg, ReadFromPtr, ReadReg, ReadStack, ThreadedInstr, WriteReg, WriteStack, WriteToReg, WriteToPtr},
         func::{CompiledFuncBody, Func, FuncEntity, FuncType, InstrSlot, UncompiledFuncBody},
-        runtime::global::{GlobalEntity, TypedGlobalEntity},
+        runtime::{
+            global::{GlobalEntity, TypedGlobalEntity},
+            table::{TableEntity, TypedTableEntity},
+        },
         guarded::Guarded,
         instance::Instance,
         ops::*,
         ref_::{ExternRef, FuncRef, RefType, UnguardedExternRef, UnguardedFuncRef},
         store::Store,
-        table::{TableEntity, TypedTableEntity},
         val::{UnguardedVal, ValType, ValTypeOf},
     },
     std::{mem, ops::{Deref, Index, IndexMut}, ptr},
@@ -1735,7 +1737,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         let table = self.instance.table(table_idx).unwrap();
 
         // Obtain the type of the elements in the [`Table`].
-        let elem_type = table.type_(&self.store).elem;
+        let elem_type = table.ty(&self.store).elem;
 
         // Emit the instruction.
         self.emit_instr(select_table_get(elem_type, self.opd(0).kind()));
@@ -1764,7 +1766,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         let table = self.instance.table(table_idx).unwrap();
 
         // Obtain the type of the elements in the [`Table`].
-        let elem_type = table.type_(&self.store).elem;
+        let elem_type = table.ty(&self.store).elem;
 
         // Emit the instruction.
         self.emit_instr(select_table_set(
@@ -1796,7 +1798,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         let table = self.instance.table(table_idx).unwrap();
 
         // Obtain the type of the elements in the [`Table`].
-        let elem_type = table.type_(&self.store).elem;
+        let elem_type = table.ty(&self.store).elem;
 
         // Emit the instruction.
         self.emit_instr(select_table_size(elem_type));
@@ -1822,7 +1824,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         let table = self.instance.table(table_idx).unwrap();
 
         // Obtain the type of the elements in the [`Table`].
-        let elem_type = table.type_(&self.store).elem;
+        let elem_type = table.ty(&self.store).elem;
 
         // This instruction has only one variant for each type, which reads all its operands from
         // the stack, so we need to ensure that all operands are neither constant nor register
@@ -1862,7 +1864,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         let table = self.instance.table(table_idx).unwrap();
 
         // Obtain the type of the elements in the [`Table`].
-        let elem_type = table.type_(&self.store).elem;
+        let elem_type = table.ty(&self.store).elem;
 
         // This instruction has only one variant for each type, which reads all its operands from
         // the stack, so we need to ensure that all operands are neither constants nor stored in a
@@ -1903,7 +1905,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         let src_table = self.instance.table(src_table_idx).unwrap();
 
         // Obtain the type of the elements in the destination [`Table`].
-        let elem_type = dst_table.type_(&self.store).elem;
+        let elem_type = dst_table.ty(&self.store).elem;
 
         // This instruction has only one variant for each type, which reads all its operands from
         // the stack, so we need to ensure that all operands are neither constant nor register
@@ -1945,7 +1947,7 @@ impl<'a> InstrVisitor for Compile<'a> {
         let src_elem = self.instance.elem(src_elem_idx).unwrap();
 
         // Obtain the type of the elements in the destination [`Table`].
-        let elem_type = dst_table.type_(&self.store).elem;
+        let elem_type = dst_table.ty(&self.store).elem;
 
         // This instruction has only one variant for each type, which reads all its operands from
         // the stack, so we need to ensure that all operands are neither constant nor register

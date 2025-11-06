@@ -6,10 +6,12 @@ use {
         engine::Engine,
         extern_::ExternEntity,
         func::{FuncEntity, FuncType},
-        runtime::global::GlobalEntity,
+        runtime::{
+            global::GlobalEntity,
+            table::TableEntity,
+        },
         guarded::Guarded,
         mem::MemEntity,
-        table::TableEntity,
     },
     std::{
         collections::HashMap,

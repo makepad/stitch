@@ -129,3 +129,26 @@ impl Decode for RefType {
         }
     }
 }
+
+pub(crate) trait RefTypeOf {
+    fn ref_type_of() -> RefType;
+}
+
+macro_rules! impl_val_type_of {
+    ($($($T:ty)* => $RefType:expr),*) => {
+        $(
+            $(
+                impl RefTypeOf for $T {
+                    fn ref_type_of() -> RefType {
+                        $RefType
+                    }
+                }
+            )*
+        )*
+    }
+}
+
+impl_val_type_of! {
+    FuncRef => RefType::FuncRef,
+    ExternRef => RefType::ExternRef
+}

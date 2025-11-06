@@ -9,14 +9,16 @@ use {
         error::Error,
         extern_val::{ExternType, ExternTypeDesc, ExternVal, ExternValDesc},
         func::{UncompiledFuncBody, Func, FuncType},
-        runtime::global::{Global, GlobalType},
+        runtime::{
+            global::{Global, GlobalType},
+            table::{Table, TableType},
+        },
         guarded::Guarded,
         instance::{Instance, InstanceIniter},
         linker::{InstantiateError, Linker},
         mem::{Mem, MemType},
         ref_::{Ref, RefType},
         store::Store,
-        table::{Table, TableType},
         trap::Trap,
         val::ValType,
     },
@@ -269,7 +271,7 @@ impl Module {
                         .lookup(module, name)
                         .ok_or(InstantiateError::DefNotFound)?;
                     let table = val.to_table().ok_or(InstantiateError::ImportKindMismatch)?;
-                    if !table.type_(store).is_subtype_of(type_) {
+                    if !table.ty(store).is_subtype_of(type_) {
                         return Err(InstantiateError::TableTypeMismatch)?;
                     }
                     initer.push_table(table);

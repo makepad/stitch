@@ -1,11 +1,13 @@
 use crate::{
     decode::{Decode, DecodeError, Decoder},
     func::{Func, FuncType, UnguardedFunc},
-    runtime::global::{Global, GlobalType, UnguardedGlobal},
+    runtime::{
+        global::{Global, GlobalType, UnguardedGlobal},
+        table::{Table, TableType, UnguardedTable},
+    },
     guarded::Guarded,
     mem::{Mem, MemType, UnguardedMem},
     store::{Store, StoreGuard},
-    table::{Table, TableType, UnguardedTable},
 };
 
 /// A Wasm entity that can be imported or exported.
@@ -22,7 +24,7 @@ impl ExternVal {
     pub fn type_(self, store: &Store) -> ExternType {
         match self {
             Self::Func(func) => ExternType::Func(func.type_(store).clone()),
-            Self::Table(table) => ExternType::Table(table.type_(store)),
+            Self::Table(table) => ExternType::Table(table.ty(store)),
             Self::Memory(mem) => ExternType::Mem(mem.type_(store)),
             Self::Global(global) => ExternType::Global(global.ty(store)),
         }
