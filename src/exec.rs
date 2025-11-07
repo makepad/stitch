@@ -102,15 +102,6 @@ pub(crate) type Cx<'a> = *mut Context<'a>;
 /// An execution context for executing threaded code.
 #[derive(Debug)]
 pub(crate) struct Context<'a> {
-    // Virtual registers
-    pub(crate) ip: Ip,
-    pub(crate) sp: Sp,
-    pub(crate) md: Md,
-    pub(crate) ms: Ms,
-    pub(crate) ia: Ia,
-    pub(crate) sa: Sa,
-    pub(crate) da: Da,
-
     // A mutable reference to the store in which we're executing.
     pub(crate) store: &'a mut Store,
     // A mutable reference to the stack on which we're executing.
@@ -204,56 +195,46 @@ pub(crate) fn exec(
 
             // Create an execution context.
             let mut context = Context {
-                ip: trampoline.as_mut_ptr() as *mut u8,
-                sp: unsafe { stack.as_mut_ptr().add(stack.len()) },
-                md: ptr::null_mut(),
-                ms: 0,
-                ia: 0,
-                sa: 0.0,
-                da: 0.0,
                 store,
                 stack: &mut *stack,
                 error: None,
             };
 
             // Main interpreter loop
-            loop {
-                match ControlFlow::from_bits(unsafe {
-                    let instr: ThreadedInstr = ptr::read(context.ip.cast());
-                    (instr)(
-                        context.ip,
-                        context.sp,
-                        context.md,
-                        context.ms,
-                        context.ia,
-                        context.sa,
-                        context.da,
-                        &mut context as *mut _,
-                    )
-                })
-                .unwrap()
-                {
-                    ControlFlow::Stop => {
-                        // Reset the stack to the start of the call frame.
-                        let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
-                        unsafe { context.stack.set_len(stack_height) };
+            match ControlFlow::from_bits(unsafe {
+                let ip = trampoline.as_mut_ptr() as *mut u8;
+                let instr: ThreadedInstr = ptr::read(ip.cast());
+                (instr)(
+                    ip,
+                    context.stack.as_mut_ptr().add(context.stack.len()),
+                    ptr::null_mut(),
+                    0,
+                    0,
+                    0.0,
+                    0.0,
+                    &mut context as *mut _,
+                )
+            })
+            .unwrap()
+            {
+                ControlFlow::Stop => {
+                    // Reset the stack to the start of the call frame.
+                    let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
+                    unsafe { context.stack.set_len(stack_height) };
+                }
+                ControlFlow::Trap(trap) => {
+                    // Reset the stack to the start of the call frame.
+                    let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
+                    unsafe { context.stack.set_len(stack_height) };
 
-                        break;
-                    }
-                    ControlFlow::Trap(trap) => {
-                        // Reset the stack to the start of the call frame.
-                        let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
-                        unsafe { context.stack.set_len(stack_height) };
+                    return Err(trap)?;
+                }
+                ControlFlow::Error => {
+                    // Reset the stack to the start of the call frame.
+                    let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
+                    unsafe { context.stack.set_len(stack_height) };
 
-                        return Err(trap)?;
-                    }
-                    ControlFlow::Error => {
-                        // Reset the stack to the start of the call frame.
-                        let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
-                        unsafe { context.stack.set_len(stack_height) };
-
-                        return Err(context.error.take().unwrap());
-                    }
+                    return Err(context.error.take().unwrap());
                 }
             }
         }
