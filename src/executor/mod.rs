@@ -1,5 +1,9 @@
 //! Types and functions for executing threaded code.
 
+pub(crate) mod global;
+
+pub(crate) use global::*;
+
 use {
     crate::{
         cast::{ExtendingCast, ExtendingCastFrom, WrappingCast, WrappingCastFrom},
@@ -11,7 +15,6 @@ use {
         extern_::UnguardedExtern,
         func::{Caller, Func, FuncBody, FuncEntity, FuncType, InstrSlot, UnguardedFunc},
         runtime::{
-            global::{GlobalEntity, TypedGlobalEntity, UnguardedGlobal},
             table::{TableEntity, TypedTableEntity, UnguardedTable},
         },
         guarded::Guarded,
@@ -72,10 +75,10 @@ pub(crate) type ThreadedInstr = unsafe extern "sysv64" fn(
 
 // Virtual registers
 
-/// The instruction pointer register (`Ip`) stores a pointer to the current instruction.
+/// The instruction pointer (`Ip`) stores a pointer to the start of the current instruction.
 pub(crate) type Ip = *mut u8;
 
-/// The stack pointer register (`Sp`) stores a pointer to the end of the current call frame.
+/// The stack pointer stores a pointer to the start of the current call frame.
 pub(crate) type Sp = *mut u8;
 
 /// The memory data register (`Md`) stores a pointer to the start of the current [`Memory`].
@@ -676,58 +679,6 @@ where
             x1
         };
         W::write(&mut args, y);
-        args.next()
-    }
-}
-
-// Variable instructions
-
-pub(crate) unsafe extern "C" fn global_get<T, W>(
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ia: Ia,
-    sa: Sa,
-    da: Da,
-    cx: Cx,
-) -> ControlFlowBits
-where
-    T: Guarded,
-    TypedGlobalEntity<T>: DowncastRef<GlobalEntity>,
-    W: Write<T::Unguarded>,
-{
-    unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
-        let global: UnguardedGlobal = args.read_imm();
-        let global = global.as_ref().downcast_ref::<T>().unwrap_unchecked();
-        let val = global.get_unguarded();
-        W::write(&mut args, val);
-        args.next()
-    }
-}
-
-pub(crate) unsafe extern "C" fn global_set<T, R>(
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ia: Ia,
-    sa: Sa,
-    da: Da,
-    cx: Cx,
-) -> ControlFlowBits
-where
-    T: Guarded,
-    TypedGlobalEntity<T>: DowncastMut<GlobalEntity>,
-    R: Read<T::Unguarded>,
-{
-    unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
-        let val = R::read(&mut args);
-        let mut global: UnguardedGlobal = args.read_imm();
-        let global = global.as_mut().downcast_mut::<T>().unwrap_unchecked();
-        global.set_unguarded(val);
         args.next()
     }
 }

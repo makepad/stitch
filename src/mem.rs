@@ -2,7 +2,7 @@ use {
     crate::{
         data::{Data, DataEntity},
         decode::{Decode, DecodeError, Decoder},
-        exec::SavedRegs,
+        executor::SavedRegs,
         func::Context,
         guarded::Guarded,
         limits::Limits,

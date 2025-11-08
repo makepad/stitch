@@ -1,5 +1,5 @@
 use crate::{
-    exec,
+    executor,
     error::Error,
     func::{Caller, FuncType, HostFuncTrampoline},
     guarded::Guarded,
@@ -76,7 +76,7 @@ macro_rules! impl_into_fund {
                     Self::Params::types(),
                     Self::Results::types(),
                 );
-                let call_frame_size = exec::call_frame_size(&type_);
+                let call_frame_size = executor::call_frame_size(&type_);
                 (
                     type_,
                     HostFuncTrampoline::new(move |caller: Caller| -> Result<(), Error> {

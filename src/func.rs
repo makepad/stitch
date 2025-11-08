@@ -3,7 +3,7 @@ use {
         code::Code,
         decode::{Decode, DecodeError, Decoder},
         error::Error,
-        exec,
+        executor,
         guarded::Guarded,
         instance::Instance,
         into_func::IntoFunc,
@@ -57,10 +57,10 @@ impl Func {
             }
         }
         if let Some(stack) = stack {
-            exec::exec(store, stack, self, args, results)
+            executor::exec(store, stack, self, args, results)
         } else {
             let mut stack = Stack::new(8 * 1024 * 1024);
-            exec::exec(store, &mut stack, self, args, results)
+            executor::exec(store, &mut stack, self, args, results)
         }
     }
 
