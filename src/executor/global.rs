@@ -2,14 +2,10 @@
 
 use {
     super::*,
-    crate::{
-        downcast::{DowncastMut, DowncastRef},
-        guarded::Guarded,
-        runtime::global::{GlobalEntity, TypedGlobalEntity, UnguardedGlobal},
-    },
+    crate::runtime::global::{GlobalEntity, TypedGlobalEntity, UnguardedGlobal},
 };
 
-/// Executes the `global.set` instruction.
+/// Executes a `global.set` instruction.
 pub(crate) unsafe extern "C" fn execute_global_get<T, W>(
     ip: Ip,
     sp: Sp,
@@ -35,7 +31,7 @@ where
     }
 }
 
-/// Executes the `global.set` instruction.
+/// Executes a `global.set` instruction.
 pub(crate) unsafe extern "C" fn execute_global_set<T, R>(
     ip: Ip,
     sp: Sp,

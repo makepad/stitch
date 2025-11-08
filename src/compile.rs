@@ -3389,9 +3389,9 @@ where
     TypedTableEntity<T>: DowncastRef<TableEntity>,
 {
     match input {
-        OpdKind::Imm => executor::table_get::<T, ReadImm, WriteStack>,
-        OpdKind::Stk => executor::table_get::<T, ReadStack, WriteStack>,
-        OpdKind::Reg => executor::table_get::<T, ReadReg, WriteStack>,
+        OpdKind::Imm => executor::execute_table_get::<T, ReadImm, WriteStack>,
+        OpdKind::Stk => executor::execute_table_get::<T, ReadStack, WriteStack>,
+        OpdKind::Reg => executor::execute_table_get::<T, ReadReg, WriteStack>,
     }
 }
 
@@ -3409,57 +3409,57 @@ where
     TypedTableEntity<T>: DowncastMut<TableEntity>,
 {
     match (input_0, input_1) {
-        (OpdKind::Imm, OpdKind::Imm) => executor::table_set::<T, ReadImm, ReadImm>,
-        (OpdKind::Stk, OpdKind::Imm) => executor::table_set::<T, ReadStack, ReadImm>,
-        (OpdKind::Reg, OpdKind::Imm) => executor::table_set::<T, ReadReg, ReadImm>,
-        (OpdKind::Imm, OpdKind::Stk) => executor::table_set::<T, ReadImm, ReadStack>,
-        (OpdKind::Stk, OpdKind::Stk) => executor::table_set::<T, ReadStack, ReadStack>,
-        (OpdKind::Reg, OpdKind::Stk) => executor::table_set::<T, ReadReg, ReadStack>,
-        (OpdKind::Imm, OpdKind::Reg) => executor::table_set::<T, ReadImm, ReadReg>,
-        (OpdKind::Stk, OpdKind::Reg) => executor::table_set::<T, ReadStack, ReadReg>,
-        (OpdKind::Reg, OpdKind::Reg) => executor::table_set::<T, ReadReg, ReadReg>,
+        (OpdKind::Imm, OpdKind::Imm) => executor::execute_table_set::<T, ReadImm, ReadImm>,
+        (OpdKind::Stk, OpdKind::Imm) => executor::execute_table_set::<T, ReadStack, ReadImm>,
+        (OpdKind::Reg, OpdKind::Imm) => executor::execute_table_set::<T, ReadReg, ReadImm>,
+        (OpdKind::Imm, OpdKind::Stk) => executor::execute_table_set::<T, ReadImm, ReadStack>,
+        (OpdKind::Stk, OpdKind::Stk) => executor::execute_table_set::<T, ReadStack, ReadStack>,
+        (OpdKind::Reg, OpdKind::Stk) => executor::execute_table_set::<T, ReadReg, ReadStack>,
+        (OpdKind::Imm, OpdKind::Reg) => executor::execute_table_set::<T, ReadImm, ReadReg>,
+        (OpdKind::Stk, OpdKind::Reg) => executor::execute_table_set::<T, ReadStack, ReadReg>,
+        (OpdKind::Reg, OpdKind::Reg) => executor::execute_table_set::<T, ReadReg, ReadReg>,
     }
 }
 
 fn select_table_size(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => executor::table_size::<FuncRef, WriteStack>,
-        RefType::ExternRef => executor::table_size::<ExternRef, WriteStack>,
+        RefType::FuncRef => executor::execute_table_size::<FuncRef, WriteStack>,
+        RefType::ExternRef => executor::execute_table_size::<ExternRef, WriteStack>,
     }
 }
 
 fn select_table_grow(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => executor::table_grow::<FuncRef, ReadStack, ReadStack, WriteStack>,
-        RefType::ExternRef => executor::table_grow::<ExternRef, ReadStack, ReadStack, WriteStack>,
+        RefType::FuncRef => executor::execute_table_grow::<FuncRef, ReadStack, ReadStack, WriteStack>,
+        RefType::ExternRef => executor::execute_table_grow::<ExternRef, ReadStack, ReadStack, WriteStack>,
     }
 }
 
 fn select_table_fill(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => executor::table_fill::<FuncRef, ReadStack, ReadStack, ReadStack>,
-        RefType::ExternRef => executor::table_fill::<ExternRef, ReadStack, ReadStack, ReadStack>,
+        RefType::FuncRef => executor::execute_table_fill::<FuncRef, ReadStack, ReadStack, ReadStack>,
+        RefType::ExternRef => executor::execute_table_fill::<ExternRef, ReadStack, ReadStack, ReadStack>,
     }
 }
 
 fn select_table_copy(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => executor::table_copy::<FuncRef, ReadStack, ReadStack, ReadStack>,
-        RefType::ExternRef => executor::table_copy::<ExternRef, ReadStack, ReadStack, ReadStack>,
+        RefType::FuncRef => executor::execute_table_copy::<FuncRef, ReadStack, ReadStack, ReadStack>,
+        RefType::ExternRef => executor::execute_table_copy::<ExternRef, ReadStack, ReadStack, ReadStack>,
     }
 }
 
 fn select_table_init(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => executor::table_init::<FuncRef, ReadStack, ReadStack, ReadStack>,
-        RefType::ExternRef => executor::table_init::<ExternRef, ReadStack, ReadStack, ReadStack>,
+        RefType::FuncRef => executor::execute_table_init::<FuncRef, ReadStack, ReadStack, ReadStack>,
+        RefType::ExternRef => executor::execute_table_init::<ExternRef, ReadStack, ReadStack, ReadStack>,
     }
 }
 
 fn select_elem_drop(type_: RefType) -> ThreadedInstr {
     match type_ {
-        RefType::FuncRef => executor::elem_drop::<FuncRef>,
-        RefType::ExternRef => executor::elem_drop::<ExternRef>,
+        RefType::FuncRef => executor::execute_elem_drop::<FuncRef>,
+        RefType::ExternRef => executor::execute_elem_drop::<ExternRef>,
     }
 }
 

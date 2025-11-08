@@ -1,8 +1,24 @@
 //! Types and functions for executing threaded code.
 
-pub(crate) mod global;
+// Helper macros
 
-pub(crate) use global::*;
+/// A helper macro for unwrapping a result or propagating its trap.
+macro_rules! r#try {
+    ($expr:expr) => {
+        match $expr {
+            Ok(val) => val,
+            Err(trap) => return ControlFlow::Trap(trap).to_bits(),
+        }
+    };
+}
+
+pub(crate) mod global;
+pub(crate) mod table;
+
+pub(crate) use {
+    global::*,
+    table::*,
+};
 
 use {
     crate::{
@@ -14,9 +30,7 @@ use {
         error::Error,
         extern_::UnguardedExtern,
         func::{Caller, Func, FuncBody, FuncEntity, FuncType, InstrSlot, UnguardedFunc},
-        runtime::{
-            table::{TableEntity, TypedTableEntity, UnguardedTable},
-        },
+        runtime::table::UnguardedTable,
         guarded::Guarded,
         mem::UnguardedMem,
         ops::*,
@@ -271,18 +285,6 @@ pub(crate) fn exec(
     }
 
     Ok(())
-}
-
-// Helper macros
-
-/// A helper macro for unwrapping a result or propagating its trap.
-macro_rules! r#try {
-    ($expr:expr) => {
-        match $expr {
-            Ok(val) => val,
-            Err(trap) => return ControlFlow::Trap(trap).to_bits(),
-        }
-    };
 }
 
 // Control instructions
@@ -679,235 +681,6 @@ where
             x1
         };
         W::write(&mut args, y);
-        args.next()
-    }
-}
-
-// Table instructions
-
-pub(crate) unsafe extern "C" fn table_get<T, R, W> (
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ia: Ia,
-    sa: Sa,
-    da: Da,
-    cx: Cx,
-) -> ControlFlowBits
-where
-    T: Guarded,
-    TypedTableEntity<T>: DowncastRef<TableEntity>,
-    R: Read<u32>,
-    W: Write<T::Unguarded>,
-{
-    unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
-        let ida = R::read(&mut args);
-        let table: UnguardedTable = args.read_imm();
-        let table = table.as_ref().downcast_ref::<T>().unwrap_unchecked();
-        let val = r#try!(table.get_unguarded(ida).ok_or(Trap::TableAccessOutOfBounds));
-        W::write(&mut args, val);
-        args.next() 
-    }
-}
-
-pub(crate) unsafe extern "C" fn table_set<T, R0, R1> (
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ia: Ia,
-    sa: Sa,
-    da: Da,
-    cx: Cx,
-) -> ControlFlowBits
-where
-    T: Guarded,
-    TypedTableEntity<T>: DowncastMut<TableEntity>,
-    R0: Read<u32>,
-    R1: Read<T::Unguarded>,
-{
-    unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
-        let val = R1::read(&mut args);
-        let ida = R0::read(&mut args);
-        let mut table: UnguardedTable = args.read_imm();
-        let table = table.as_mut().downcast_mut::<T>().unwrap_unchecked();
-        r#try!(table.set_unguarded(ida, val).map_err(|_| Trap::TableAccessOutOfBounds));
-        args.next() 
-    }
-}
-
-pub(crate) unsafe extern "C" fn table_size<T, W>(
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ia: Ia,
-    sa: Sa,
-    da: Da,
-    cx: Cx,
-) -> ControlFlowBits
-where
-    T: Guarded,
-    TypedTableEntity<T>: DowncastRef<TableEntity>,
-    W: Write<u32>,
-{
-    unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
-        let table: UnguardedTable = args.read_imm();
-        let table = table.as_ref().downcast_ref::<T>().unwrap_unchecked();
-        let size = table.size();
-        W::write(&mut args, size);
-        args.next()
-    }
-}
-
-pub(crate) unsafe extern "C" fn table_grow<T, R0, R1, W>(
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ia: Ia,
-    sa: Sa,
-    da: Da,
-    cx: Cx,
-) -> ControlFlowBits
-where
-    T: Guarded,
-    TypedTableEntity<T>: DowncastMut<TableEntity>,
-    R0: Read<T::Unguarded>,
-    R1: Read<u32>,
-    W: Write<u32>,
-{
-    unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
-        let count = R1::read(&mut args);
-        let val = R0::read(&mut args);
-        let mut table: UnguardedTable = args.read_imm();
-        let table = table.as_mut().downcast_mut::<T>().unwrap_unchecked();
-        let old_size = table.grow_unguarded(val, count).unwrap_or(u32::MAX);
-        W::write(&mut args, old_size);
-        args.next()
-    }
-}
-
-pub(crate) unsafe extern "C" fn table_fill<T, R0, R1, R2>(
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ia: Ia,
-    sa: Sa,
-    da: Da,
-    cx: Cx,
-) -> ControlFlowBits
-where
-    T: Guarded,
-    TypedTableEntity<T>: DowncastMut<TableEntity>,
-    R0: Read<u32>,
-    R1: Read<T::Unguarded>,
-    R2: Read<u32>,
-{
-    unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
-        let count = R2::read(&mut args);
-        let val = R1::read(&mut args);
-        let ida = R0::read(&mut args);
-        let mut table: UnguardedTable = args.read_imm();
-        let table = table.as_mut().downcast_mut::<T>().unwrap_unchecked();
-        r#try!(table.fill_unguarded(ida, val, count));
-        args.next()
-    }   
-}
-
-pub(crate) unsafe extern "C" fn table_copy<T, R0, R1, R2>(
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ia: Ia,
-    sa: Sa,
-    da: Da,
-    cx: Cx,
-) -> ControlFlowBits
-where
-    T: Guarded,
-    TypedTableEntity<T>: DowncastRef<TableEntity> + DowncastMut<TableEntity>,
-    R0: Read<u32>,
-    R1: Read<u32>,
-    R2: Read<u32>,
-{
-    unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
-        let count = R2::read(&mut args);
-        let src_ida = R1::read(&mut args);
-        let dst_ida = R0::read(&mut args);
-        let mut dst_table: UnguardedTable = args.read_imm();
-        let dst_table = dst_table.as_mut().downcast_mut::<T>().unwrap_unchecked();
-        let src_table: UnguardedTable = args.read_imm();
-        let src_table = src_table.as_ref().downcast_ref::<T>().unwrap_unchecked();
-        r#try!(if dst_table as *const _ == src_table as *const _ {
-            dst_table.copy_within(dst_ida, src_ida, count)
-        } else {
-            dst_table.copy(dst_ida, src_table, src_ida, count)
-        });
-        args.next()
-    }
-}
-
-pub(crate) unsafe extern "C" fn table_init<T, R0, R1, R2>(
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ia: Ia,
-    sa: Sa,
-    da: Da,
-    cx: Cx,
-) -> ControlFlowBits
-where
-    T: Guarded,
-    TypedTableEntity<T>: DowncastMut<TableEntity>,
-    TypedElemEntity<T>: DowncastRef<ElemEntity>,
-    R0: Read<u32>,
-    R1: Read<u32>,
-    R2: Read<u32>,
-{
-    unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
-        let count = R2::read(&mut args);
-        let src_offset = R1::read(&mut args);
-        let dst_offset = R0::read(&mut args);
-        let mut dst_table: UnguardedTable = args.read_imm();
-        let dst_table = dst_table.as_mut().downcast_mut::<T>().unwrap_unchecked();
-        let src_elem: UnguardedElem = args.read_imm();
-        let src_elem = src_elem.as_ref().downcast_ref::<T>().unwrap_unchecked();
-        r#try!(dst_table.init(dst_offset, src_elem, src_offset, count));
-        args.next()
-    }
-}
-
-pub(crate) unsafe extern "C" fn elem_drop<T>(
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ia: Ia,
-    sa: Sa,
-    da: Da,
-    cx: Cx,
-) -> ControlFlowBits
-where
-    T: Guarded,
-    TypedElemEntity<T>: DowncastMut<ElemEntity>,
-{
-    unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
-        let mut elem: UnguardedElem = args.read_imm();
-        let elem = elem.as_mut().downcast_mut::<T>().unwrap_unchecked();
-        elem.drop_elems();
         args.next()
     }
 }
