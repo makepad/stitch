@@ -1,4 +1,4 @@
-mod aliasable_box;
+mod aliasable;
 mod cast;
 mod instr;
 mod code;

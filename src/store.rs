@@ -1,6 +1,6 @@
 use {
     crate::{
-        aliasable_box::AliasableBox,
+        aliasable::AliasableBox,
         data::DataEntity,
         elem::ElemEntity,
         engine::Engine,
@@ -74,7 +74,7 @@ impl Store {
     /// Returns a [`Handle`] to the inserted [`FuncEntity`].
     pub(crate) fn insert_func(&mut self, func: FuncEntity) -> Handle<FuncEntity> {
         let func = AliasableBox::from_box(Box::new(func));
-        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&func), self.id) };
+        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_non_null(&func), self.id) };
         self.funcs.push(func);
         handle
     }
@@ -84,7 +84,7 @@ impl Store {
     /// Returns a [`Handle`] to the inserted [`TableEntity`].
     pub(crate) fn insert_table(&mut self, table: TableEntity) -> Handle<TableEntity> {
         let table = AliasableBox::from_box(Box::new(table));
-        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&table), self.id) };
+        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_non_null(&table), self.id) };
         self.tables.push(table);
         handle
     }
@@ -94,7 +94,7 @@ impl Store {
     /// Returns a [`Handle`] to the inserted [`MemEntity`].
     pub(crate) fn insert_mem(&mut self, mem: MemEntity) -> Handle<MemEntity> {
         let mem = AliasableBox::from_box(Box::new(mem));
-        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&mem), self.id) };
+        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_non_null(&mem), self.id) };
         self.mems.push(mem);
         handle
     }
@@ -104,7 +104,7 @@ impl Store {
     /// Returns a [`Handle`] to the inserted [`GlobalEntity`].
     pub(crate) fn insert_global(&mut self, global: GlobalEntity) -> Handle<GlobalEntity> {
         let global = AliasableBox::from_box(Box::new(global));
-        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&global), self.id) };
+        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_non_null(&global), self.id) };
         self.globals.push(global);
         handle
     }
@@ -114,7 +114,7 @@ impl Store {
     /// Returns a [`Handle`] to the inserted [`ElemEntity`].
     pub(crate) fn insert_elem(&mut self, elem: ElemEntity) -> Handle<ElemEntity> {
         let elem = AliasableBox::from_box(Box::new(elem));
-        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&elem), self.id) };
+        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_non_null(&elem), self.id) };
         self.elems.push(elem);
         handle
     }
@@ -124,7 +124,7 @@ impl Store {
     /// Returns a [`Handle`] to the inserted [`DataEntity`].
     pub(crate) fn insert_data(&mut self, data: DataEntity) -> Handle<DataEntity> {
         let data = AliasableBox::from_box(Box::new(data));
-        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_raw(&data), self.id) };
+        let handle = unsafe { Handle::from_unguarded(AliasableBox::as_non_null(&data), self.id) };
         self.datas.push(data);
         handle
     }

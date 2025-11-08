@@ -2,7 +2,7 @@ use std::{
     fmt,
     mem::ManuallyDrop,
     ops::{Deref, DerefMut},
-    ptr::NonNull,
+    ptr::NonNull
 };
 
 pub(crate) struct AliasableBox<T>
@@ -22,7 +22,7 @@ where
         }
     }
 
-    pub(crate) fn as_raw(&self) -> NonNull<T> {
+    pub(crate) fn as_non_null(&self) -> NonNull<T> {
         self.ptr
     }
 }
