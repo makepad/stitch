@@ -13,10 +13,12 @@ macro_rules! r#try {
 }
 
 pub(crate) mod global;
+pub(crate) mod numeric;
 pub(crate) mod table;
 
 pub(crate) use {
     global::*,
+    numeric::*,
     table::*,
 };
 
@@ -955,58 +957,6 @@ pub(crate) unsafe extern "C" fn data_drop(
         let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
         let mut data: UnguardedData = args.read_imm();
         data.as_mut().drop_bytes();
-        args.next()
-    }
-}
-
-// Numeric instructions
-
-pub(crate) unsafe extern "C" fn un_op<T, U, R, W>(
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ia: Ia,
-    sa: Sa,
-    da: Da,
-    cx: Cx,
-) -> ControlFlowBits
-where
-    U: UnOp<T>,
-    R: Read<T>,
-    W: Write<U::Output>,
-{
-    unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
-        let x = R::read(&mut args);
-        let y = r#try!(U::un_op(x));
-        W::write(&mut args, y);
-        args.next()
-    }
-}
-
-pub(crate) unsafe extern "C" fn bin_op<T, B, R0, R1, W>(
-    ip: Ip,
-    sp: Sp,
-    md: Md,
-    ms: Ms,
-    ia: Ia,
-    sa: Sa,
-    da: Da,
-    cx: Cx,
-) -> ControlFlowBits
-where
-    B: BinOp<T>,
-    R0: Read<T>,
-    R1: Read<T>,
-    W: Write<B::Output>,
-{
-    unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
-        let x1 = R1::read(&mut args);
-        let x0 = R0::read(&mut args);
-        let y = r#try!(B::bin_op(x0, x1));
-        W::write(&mut args, y);
         args.next()
     }
 }

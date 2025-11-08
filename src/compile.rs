@@ -3528,9 +3528,9 @@ where
     U::Output: WriteToReg
 {
     match input {
-        OpdKind::Imm => executor::un_op::<T, U, ReadImm, WriteReg>,
-        OpdKind::Stk => executor::un_op::<T, U, ReadStack, WriteReg>,
-        OpdKind::Reg => executor::un_op::<T, U, ReadReg, WriteReg>,
+        OpdKind::Imm => executor::execute_un_op::<T, U, ReadImm, WriteReg>,
+        OpdKind::Stk => executor::execute_un_op::<T, U, ReadStack, WriteReg>,
+        OpdKind::Reg => executor::execute_un_op::<T, U, ReadReg, WriteReg>,
     }
 }
 
@@ -3541,15 +3541,15 @@ where
     B::Output: WriteToReg
 {
     match (input_0, input_1) {
-        (OpdKind::Imm, OpdKind::Imm) => executor::bin_op::<T, B, ReadImm, ReadImm, WriteReg>,
-        (OpdKind::Stk, OpdKind::Imm) => executor::bin_op::<T, B, ReadStack, ReadImm, WriteReg>,
-        (OpdKind::Reg, OpdKind::Imm) => executor::bin_op::<T, B, ReadReg, ReadImm, WriteReg>,
-        (OpdKind::Imm, OpdKind::Stk) => executor::bin_op::<T, B, ReadImm, ReadStack, WriteReg>,
-        (OpdKind::Stk, OpdKind::Stk) => executor::bin_op::<T, B, ReadStack, ReadStack, WriteReg>,
-        (OpdKind::Reg, OpdKind::Stk) => executor::bin_op::<T, B, ReadReg, ReadStack, WriteReg>,
-        (OpdKind::Imm, OpdKind::Reg) => executor::bin_op::<T, B, ReadImm, ReadReg, WriteReg>,
-        (OpdKind::Stk, OpdKind::Reg) => executor::bin_op::<T, B, ReadStack, ReadReg, WriteReg>,
-        (OpdKind::Reg, OpdKind::Reg) => executor::bin_op::<T, B, ReadReg, ReadReg, WriteReg>,
+        (OpdKind::Imm, OpdKind::Imm) => executor::execute_bin_op::<T, B, ReadImm, ReadImm, WriteReg>,
+        (OpdKind::Stk, OpdKind::Imm) => executor::execute_bin_op::<T, B, ReadStack, ReadImm, WriteReg>,
+        (OpdKind::Reg, OpdKind::Imm) => executor::execute_bin_op::<T, B, ReadReg, ReadImm, WriteReg>,
+        (OpdKind::Imm, OpdKind::Stk) => executor::execute_bin_op::<T, B, ReadImm, ReadStack, WriteReg>,
+        (OpdKind::Stk, OpdKind::Stk) => executor::execute_bin_op::<T, B, ReadStack, ReadStack, WriteReg>,
+        (OpdKind::Reg, OpdKind::Stk) => executor::execute_bin_op::<T, B, ReadReg, ReadStack, WriteReg>,
+        (OpdKind::Imm, OpdKind::Reg) => executor::execute_bin_op::<T, B, ReadImm, ReadReg, WriteReg>,
+        (OpdKind::Stk, OpdKind::Reg) => executor::execute_bin_op::<T, B, ReadStack, ReadReg, WriteReg>,
+        (OpdKind::Reg, OpdKind::Reg) => executor::execute_bin_op::<T, B, ReadReg, ReadReg, WriteReg>,
     }
 }
 
