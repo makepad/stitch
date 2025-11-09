@@ -29,7 +29,7 @@ mod stack;
 mod store;
 mod trap;
 mod val;
-mod validate;
+mod validator;
 
 pub use self::{
     decode::DecodeError,

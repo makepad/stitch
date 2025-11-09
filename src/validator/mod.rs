@@ -1,3 +1,5 @@
+mod num;
+
 use {
     crate::{
         instr::{BlockType, InstrDecoder, InstrDecoderAllocs, InstrVisitor, MemArg,},
@@ -13,7 +15,7 @@ use {
 };
 
 #[derive(Clone, Debug)]
-pub(crate) struct Validator {
+pub(crate) struct ValidatorAllocs {
     instr_decoder_allocs: InstrDecoderAllocs,
     br_table_label_idxs: Vec<u32>,
     typed_select_val_types: Vec<ValType>,
@@ -23,9 +25,9 @@ pub(crate) struct Validator {
     aux_opds: Vec<OpdType>,
 }
 
-impl Validator {
-    pub(crate) fn new() -> Validator {
-        Validator {
+impl ValidatorAllocs {
+    pub(crate) fn new() -> Self {
+        Self {
             instr_decoder_allocs: InstrDecoderAllocs::default(),
             br_table_label_idxs: Vec::new(),
             typed_select_val_types: Vec::new(),
@@ -45,7 +47,7 @@ impl Validator {
         self.locals.clear();
         self.blocks.clear();
         self.opds.clear();
-        let mut validation = Validation {
+        let mut validation = Validator {
             module,
             br_table_label_idxs: &mut self.br_table_label_idxs,
             typed_select_val_types: &mut self.typed_select_val_types,
@@ -69,14 +71,14 @@ impl Validator {
     }
 }
 
-impl Default for Validator {
+impl Default for ValidatorAllocs {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[derive(Debug)]
-struct Validation<'a> {
+struct Validator<'a> {
     module: &'a ModuleBuilder,
     br_table_label_idxs: &'a mut Vec<u32>,
     typed_select_val_types: &'a mut Vec<ValType>,
@@ -86,7 +88,7 @@ struct Validation<'a> {
     aux_opds: &'a mut Vec<OpdType>,
 }
 
-impl<'a> Validation<'a> {
+impl<'a> Validator<'a> {
     fn validate_select(&mut self, type_: Option<ValType>) -> Result<(), DecodeError> {
         if let Some(type_) = type_ {
             self.pop_opd()?.check(ValType::I32)?;
@@ -164,37 +166,6 @@ impl<'a> Validation<'a> {
         Ok(())
     }
 
-    fn validate_un_op<T, U>(&mut self) -> Result<(), DecodeError>
-    where
-        T: ValTypeOf,
-        U: UnOp<T>,
-        U::Output: ValTypeOf,
-    {
-        self.validate_un_op_inner(T::val_type_of(), U::Output::val_type_of())
-    }
-
-    fn validate_un_op_inner(&mut self, input_type: ValType, output_type: ValType) -> Result<(), DecodeError> {
-        self.pop_opd()?.check(input_type)?;
-        self.push_opd(output_type);
-        Ok(())
-    }
-
-    fn validate_bin_op<T, B>(&mut self) -> Result<(), DecodeError>
-    where
-        T: ValTypeOf,
-        B: BinOp<T>,
-        B::Output: ValTypeOf,
-    {
-        self.validate_bin_op_inner(T::val_type_of(), T::val_type_of(), B::Output::val_type_of())
-    }
-
-    fn validate_bin_op_inner(&mut self, input_type_0: ValType, input_type_1: ValType, output_type: ValType) -> Result<(), DecodeError> {
-        self.pop_opd()?.check(input_type_1)?;
-        self.pop_opd()?.check(input_type_0)?;
-        self.push_opd(output_type);
-        Ok(())
-    }
-
     fn resolve_block_type(&self, type_: BlockType) -> Result<FuncType, DecodeError> {
         match type_ {
             BlockType::TypeIdx(idx) => self.module.type_(idx).cloned(),
@@ -266,7 +237,7 @@ impl<'a> Validation<'a> {
     }
 }
 
-impl<'a> InstrVisitor for Validation<'a> {
+impl<'a> InstrVisitor for Validator<'a> {
     type Ok = ();
     type Error = DecodeError;
 

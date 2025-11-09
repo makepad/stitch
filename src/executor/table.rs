@@ -1,5 +1,5 @@
 //! Table executors
-//! 
+
 use {
     super::*,
     crate::runtime::table::{TableEntity, TypedTableEntity, UnguardedTable},

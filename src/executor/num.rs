@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// Executes a unary instruction.
+/// Executes a unary operation.
 pub(crate) unsafe extern "C" fn execute_un_op<T, U, R, W>(
     ip: Ip,
     sp: Sp,
@@ -27,7 +27,7 @@ where
     }
 }
 
-/// Executes a binary instruction.
+/// Executes a binary operation.
 pub(crate) unsafe extern "C" fn execute_bin_op<T, B, R0, R1, W>(
     ip: Ip,
     sp: Sp,

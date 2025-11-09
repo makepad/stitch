@@ -6,7 +6,7 @@ use {
         instance::Instance,
         module::ModuleBuilder,
         store::Store,
-        validate::Validator,
+        validator::ValidatorAllocs,
     },
     std::sync::{Arc, Mutex},
 };
@@ -62,7 +62,7 @@ impl Default for Engine {
 
 #[derive(Debug)]
 struct EngineInner {
-    validators: Mutex<Pool<Validator>>,
+    validators: Mutex<Pool<ValidatorAllocs>>,
     compilers: Mutex<Pool<Compiler>>,
 }
 
