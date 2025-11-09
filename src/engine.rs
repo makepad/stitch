@@ -1,6 +1,6 @@
 use {
     crate::{
-        compile::Compiler,
+        compiler::CompilerAllocs,
         decode::DecodeError,
         func::{CompiledFuncBody, Func, FuncType, UncompiledFuncBody},
         instance::Instance,
@@ -63,7 +63,7 @@ impl Default for Engine {
 #[derive(Debug)]
 struct EngineInner {
     validators: Mutex<Pool<ValidatorAllocs>>,
-    compilers: Mutex<Pool<Compiler>>,
+    compilers: Mutex<Pool<CompilerAllocs>>,
 }
 
 #[derive(Debug)]

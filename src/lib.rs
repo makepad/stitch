@@ -2,7 +2,7 @@ mod aliasable;
 mod cast;
 mod instr;
 mod code;
-mod compile;
+mod compiler;
 mod config;
 mod const_expr;
 mod data;
