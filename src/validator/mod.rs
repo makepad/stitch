@@ -1,3 +1,4 @@
+mod global;
 mod num;
 mod table;
 
@@ -470,18 +471,11 @@ impl<'a> InstrVisitor for Validator<'a> {
     }
 
     fn visit_global_get(&mut self, global_idx: u32) -> Result<(), Self::Error> {
-        let type_ = self.module.global(global_idx)?;
-        self.push_opd(type_.content());
-        Ok(())
+        self.validate_global_get(global_idx)
     }
 
     fn visit_global_set(&mut self, global_idx: u32) -> Result<(), Self::Error> {
-        let type_ = self.module.global(global_idx)?;
-        if type_.mutability() != Mutability::Var {
-            return Err(DecodeError::new("type mismatch"));
-        }
-        self.pop_opd()?.check(type_.content())?;
-        Ok(())
+        self.validate_global_set(global_idx)
     }
 
     fn visit_table_get(&mut self, table_idx: u32) -> Result<(), Self::Error> {
