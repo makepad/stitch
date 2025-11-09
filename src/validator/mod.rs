@@ -1,4 +1,5 @@
 mod num;
+mod table;
 
 use {
     crate::{
@@ -483,41 +484,24 @@ impl<'a> InstrVisitor for Validator<'a> {
         Ok(())
     }
 
-    // Table instructions
     fn visit_table_get(&mut self, table_idx: u32) -> Result<(), Self::Error> {
-        let type_ = self.module.table(table_idx)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        self.push_opd(type_.elem);
-        Ok(())
+        self.validate_table_get(table_idx)
     }
 
     fn visit_table_set(&mut self, table_idx: u32) -> Result<(), Self::Error> {
-        let type_ = self.module.table(table_idx)?;
-        self.pop_opd()?.check(type_.elem)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        Ok(())
+        self.validate_table_set(table_idx)
     }
 
     fn visit_table_size(&mut self, table_idx: u32) -> Result<(), Self::Error> {
-        self.module.table(table_idx)?;
-        self.push_opd(ValType::I32);
-        Ok(())
+        self.validate_table_size(table_idx)
     }
 
     fn visit_table_grow(&mut self, table_idx: u32) -> Result<(), Self::Error> {
-        let type_ = self.module.table(table_idx)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        self.pop_opd()?.check(type_.elem)?;
-        self.push_opd(ValType::I32);
-        Ok(())
+        self.validate_table_grow(table_idx)
     }
 
     fn visit_table_fill(&mut self, table_idx: u32) -> Result<(), Self::Error> {
-        let type_ = self.module.table(table_idx)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        self.pop_opd()?.check(type_.elem)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        Ok(())
+        self.validate_table_fill(table_idx)
     }
 
     fn visit_table_copy(
@@ -525,32 +509,15 @@ impl<'a> InstrVisitor for Validator<'a> {
         dst_table_idx: u32,
         src_table_idx: u32,
     ) -> Result<(), Self::Error> {
-        let dst_type = self.module.table(dst_table_idx)?;
-        let src_type = self.module.table(src_table_idx)?;
-        if dst_type.elem != src_type.elem {
-            return Err(DecodeError::new("type mismatch"));
-        }
-        self.pop_opd()?.check(ValType::I32)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        Ok(())
+        self.validate_table_copy(dst_table_idx, src_table_idx)
     }
 
     fn visit_table_init(&mut self, table_idx: u32, elem_idx: u32) -> Result<(), Self::Error> {
-        let dst_type = self.module.table(table_idx)?;
-        let src_type = self.module.elem(elem_idx)?;
-        if dst_type.elem != src_type {
-            return Err(DecodeError::new("type mismatch"));
-        }
-        self.pop_opd()?.check(ValType::I32)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        Ok(())
+        self.validate_table_init(table_idx, elem_idx)
     }
 
     fn visit_elem_drop(&mut self, elem_idx: u32) -> Result<(), Self::Error> {
-        self.module.elem(elem_idx)?;
-        Ok(())
+        self.validate_elem_drop(elem_idx)
     }
 
     // Memory instructions
