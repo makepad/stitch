@@ -116,18 +116,7 @@ pub(crate) type Da = f64;
 ///
 /// This register is special because it's the only one that does not have a corresponding field in
 /// the [`Context`], but instead stores a pointer to the [`Context`] itself.
-pub(crate) type Cx<'a> = *mut Context<'a>;
-
-/// An execution context for executing threaded code.
-#[derive(Debug)]
-pub(crate) struct Context<'a> {
-    // A mutable reference to the store in which we're executing.
-    pub(crate) store: &'a mut Store,
-    // A mutable reference to the stack on which we're executing.
-    pub(crate) stack: &'a mut Stack,
-    // Used to store out-of-band error data.
-    pub(crate) error: Option<Error>,
-}
+pub(crate) type Cx<'a> = *mut Executor<'a>;
 
 /// Used to tell the interpreter what to do next.
 #[derive(Clone, Copy, Debug)]
@@ -168,6 +157,7 @@ pub(crate) type ControlFlowBits = usize;
 pub(crate) struct Executor<'a> {
     store: &'a mut Store,
     stack: &'a mut Stack,
+    error: Option<Error>,
 }
 
 impl<'a> Executor<'a> {
@@ -175,6 +165,7 @@ impl<'a> Executor<'a> {
         Self {
             store,
             stack,
+            error: None,
         }
     }
 
@@ -225,48 +216,41 @@ impl<'a> Executor<'a> {
                     stop as InstrSlot,
                 ];
 
-                // Create an execution context.
-                let mut context = Context {
-                    store: &mut *self.store,
-                    stack: &mut *self.stack,
-                    error: None,
-                };
-
                 // Main interpreter loop
                 match ControlFlow::from_bits(unsafe {
                     let ip = trampoline.as_mut_ptr() as *mut u8;
                     let instr: ThreadedInstr = ptr::read(ip.cast());
                     (instr)(
                         ip,
-                        context.stack.as_mut_ptr().add(context.stack.len()),
+                        self.stack.as_mut_ptr().add(self.stack.len()),
                         ptr::null_mut(),
                         0,
                         0,
                         0.0,
                         0.0,
-                        &mut context as *mut _,
+                        self,
                     )
                 })
                 .unwrap()
                 {
                     ControlFlow::Stop => {
                         // Reset the stack to the start of the call frame.
-                        let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
-                        unsafe { context.stack.set_len(stack_height) };
+                        let stack_height = unsafe { ptr.offset_from(self.stack.as_ptr()) as usize };
+                        unsafe { self.stack.set_len(stack_height) };
                     }
                     ControlFlow::Trap(trap) => {
                         // Reset the stack to the start of the call frame.
-                        let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
-                        unsafe { context.stack.set_len(stack_height) };
+                        let stack_height = unsafe { ptr.offset_from(self.stack.as_ptr()) as usize };
+                        unsafe { self.stack.set_len(stack_height) };
 
                         return Err(trap)?;
                     }
                     ControlFlow::Error => {
                         // Reset the stack to the start of the call frame.
-                        let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
-                        unsafe { context.stack.set_len(stack_height) };
+                        let stack_height = unsafe { ptr.offset_from(self.stack.as_ptr()) as usize };
+                        unsafe { self.stack.set_len(stack_height) };
 
-                        return Err(context.error.take().unwrap());
+                        return Err(self.error.take().unwrap());
                     }
                 }
             }
