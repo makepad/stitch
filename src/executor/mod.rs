@@ -164,129 +164,143 @@ impl ControlFlow {
 /// The raw bit representation of a `ControlFlow`.
 pub(crate) type ControlFlowBits = usize;
 
-/// Executes the given [`Func`] with the given arguments.
-///
-/// The results are written to the `results` slice.
-pub(crate) fn exec(
-    store: &mut Store,
-    stack: &mut Stack,
-    func: Func,
-    args: &[Val],
-    results: &mut [Val],
-) -> Result<(), Error> {
-    // Obtain the type of the function.
-    let type_ = func.type_(store).clone();
+#[derive(Debug)]
+pub(crate) struct Executor<'a> {
+    store: &'a mut Store,
+    stack: &'a mut Stack,
+}
 
-    // Check that the stack has enough space.
-    if call_frame_size(&type_) > stack.capacity() - stack.len() {
-        return Err(Trap::StackOverflow)?;
+impl<'a> Executor<'a> {
+    pub(crate) fn new(store: &'a mut Store, stack: &'a mut Stack) -> Self {
+        Self {
+            store,
+            stack,
+        }
     }
 
-    // Copy the arguments to the stack.
-    let mut ptr = unsafe { stack.as_mut_ptr().add(stack.len()) };
-    for arg in args.iter().copied() {
-        unsafe {
-            arg.to_unguarded(store.guard()).write_to_ptr(ptr);
-            ptr = ptr.add(arg.type_().padded_size_of());
-        };
-    }
+    /// Executes the given [`Func`] with the given arguments.
+    ///
+    /// The results are written to the `results` slice.
+    pub(crate) fn execute(
+        &mut self,
+        func: Func,
+        args: &[Val],
+        results: &mut [Val],
+    ) -> Result<(), Error> {
+        // Obtain the type of the function.
+        let type_ = func.type_(self.store).clone();
 
-    // Ensure that the function is compiled before calling it.
-    func.compile(store);
+        // Check that the stack has enough space.
+        if call_frame_size(&type_) > self.stack.capacity() - self.stack.len() {
+            return Err(Trap::StackOverflow)?;
+        }
 
-    // Store the start of the call frame so we can reset the stack to it later.
-    let ptr = unsafe { stack.as_mut_ptr().add(stack.len()) };
-
-    match func.0.as_mut(store) {
-        FuncEntity::Wasm(func) => {
-            // Obtain the compiled code for this function.
-            let FuncBody::Compiled(code) = func.code_mut() else {
-                unreachable!();
+        // Copy the arguments to the stack.
+        let mut ptr = unsafe { self.stack.as_mut_ptr().add(self.stack.len()) };
+        for arg in args.iter().copied() {
+            unsafe {
+                arg.to_unguarded(self.store.guard()).write_to_ptr(ptr);
+                ptr = ptr.add(arg.type_().padded_size_of());
             };
+        }
 
-            // Create a trampoline for the [`WasmFuncEntity`].
-            let mut trampoline = [
-                call_wasm as InstrSlot,
-                code.code.as_mut_ptr() as InstrSlot,
-                call_frame_size(&type_),
-                stop as InstrSlot,
-            ];
+        // Ensure that the function is compiled before calling it.
+        func.compile(self.store);
 
-            // Create an execution context.
-            let mut context = Context {
-                store,
-                stack: &mut *stack,
-                error: None,
-            };
+        // Store the start of the call frame so we can reset the stack to it later.
+        let ptr = unsafe { self.stack.as_mut_ptr().add(self.stack.len()) };
 
-            // Main interpreter loop
-            match ControlFlow::from_bits(unsafe {
-                let ip = trampoline.as_mut_ptr() as *mut u8;
-                let instr: ThreadedInstr = ptr::read(ip.cast());
-                (instr)(
-                    ip,
-                    context.stack.as_mut_ptr().add(context.stack.len()),
-                    ptr::null_mut(),
-                    0,
-                    0,
-                    0.0,
-                    0.0,
-                    &mut context as *mut _,
-                )
-            })
-            .unwrap()
-            {
-                ControlFlow::Stop => {
-                    // Reset the stack to the start of the call frame.
-                    let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
-                    unsafe { context.stack.set_len(stack_height) };
-                }
-                ControlFlow::Trap(trap) => {
-                    // Reset the stack to the start of the call frame.
-                    let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
-                    unsafe { context.stack.set_len(stack_height) };
+        match func.0.as_mut(self.store) {
+            FuncEntity::Wasm(func) => {
+                // Obtain the compiled code for this function.
+                let FuncBody::Compiled(code) = func.code_mut() else {
+                    unreachable!();
+                };
 
-                    return Err(trap)?;
-                }
-                ControlFlow::Error => {
-                    // Reset the stack to the start of the call frame.
-                    let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
-                    unsafe { context.stack.set_len(stack_height) };
+                // Create a trampoline for the [`WasmFuncEntity`].
+                let mut trampoline = [
+                    call_wasm as InstrSlot,
+                    code.code.as_mut_ptr() as InstrSlot,
+                    call_frame_size(&type_),
+                    stop as InstrSlot,
+                ];
 
-                    return Err(context.error.take().unwrap());
+                // Create an execution context.
+                let mut context = Context {
+                    store: &mut *self.store,
+                    stack: &mut *self.stack,
+                    error: None,
+                };
+
+                // Main interpreter loop
+                match ControlFlow::from_bits(unsafe {
+                    let ip = trampoline.as_mut_ptr() as *mut u8;
+                    let instr: ThreadedInstr = ptr::read(ip.cast());
+                    (instr)(
+                        ip,
+                        context.stack.as_mut_ptr().add(context.stack.len()),
+                        ptr::null_mut(),
+                        0,
+                        0,
+                        0.0,
+                        0.0,
+                        &mut context as *mut _,
+                    )
+                })
+                .unwrap()
+                {
+                    ControlFlow::Stop => {
+                        // Reset the stack to the start of the call frame.
+                        let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
+                        unsafe { context.stack.set_len(stack_height) };
+                    }
+                    ControlFlow::Trap(trap) => {
+                        // Reset the stack to the start of the call frame.
+                        let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
+                        unsafe { context.stack.set_len(stack_height) };
+
+                        return Err(trap)?;
+                    }
+                    ControlFlow::Error => {
+                        // Reset the stack to the start of the call frame.
+                        let stack_height = unsafe { ptr.offset_from(context.stack.as_ptr()) as usize };
+                        unsafe { context.stack.set_len(stack_height) };
+
+                        return Err(context.error.take().unwrap());
+                    }
                 }
             }
-        }
-        FuncEntity::Host(func) => {
-            // Set the stack pointer to the end of the call frame.
-            let stack_height = unsafe { ptr.add(call_frame_size(&type_)).offset_from(stack.as_ptr()) as usize };
-            unsafe { stack.set_len(stack_height) };
+            FuncEntity::Host(func) => {
+                // Set the stack pointer to the end of the call frame.
+                let stack_height = unsafe { ptr.add(call_frame_size(&type_)).offset_from(self.stack.as_ptr()) as usize };
+                unsafe { self.stack.set_len(stack_height) };
 
-            // Call the [`HostTrampoline`] of the [`HostFuncEntity`].
-            func.trampoline().clone().call(Caller {
-                store,
-                stack,
-            })?;
+                // Call the [`HostTrampoline`] of the [`HostFuncEntity`].
+                func.trampoline().clone().call(Caller {
+                    store: &mut *self.store,
+                    stack: &mut *self.stack
+                })?;
 
-            // Reset the stack to the start of the call frame.
-            let stack_height = unsafe { ptr.offset_from(stack.as_ptr()) as usize };
-            unsafe { stack.set_len(stack_height) };
+                // Reset the stack to the start of the call frame.
+                let stack_height = unsafe { ptr.offset_from(self.stack.as_ptr()) as usize };
+                unsafe { self.stack.set_len(stack_height) };
+            }
         }
+
+        // Copy the results from the stack.
+        let mut ptr = unsafe { self.stack.as_mut_ptr().add(self.stack.len()) };
+        for result in results.iter_mut() {
+            unsafe {
+                *result = Val::from_unguarded(
+                    UnguardedVal::read_from_ptr(ptr, result.type_()),
+                    self.store.guard(),
+                );
+                ptr = ptr.add(result.type_().padded_size_of());
+            }
+        }
+
+        Ok(())
     }
-
-    // Copy the results from the stack.
-    let mut ptr = unsafe { stack.as_mut_ptr().add(stack.len()) };
-    for result in results.iter_mut() {
-        unsafe {
-            *result = Val::from_unguarded(
-                UnguardedVal::read_from_ptr(ptr, result.type_()),
-                store.guard(),
-            );
-            ptr = ptr.add(result.type_().padded_size_of());
-        }
-    }
-
-    Ok(())
 }
 
 // Control instructions
