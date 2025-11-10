@@ -14,7 +14,7 @@ pub(crate) unsafe extern "C" fn execute_table_get<T, R, W> (
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     T: Guarded,
@@ -23,7 +23,7 @@ where
     W: Write<T::Unguarded>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let idx = R::read(&mut args);
         let table: UnguardedTable = args.read_imm();
         let table = table.as_ref().downcast_ref::<T>().unwrap_unchecked();
@@ -42,7 +42,7 @@ pub(crate) unsafe extern "C" fn execute_table_set<T, R0, R1> (
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     T: Guarded,
@@ -51,7 +51,7 @@ where
     R1: Read<T::Unguarded>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let val = R1::read(&mut args);
         let idx = R0::read(&mut args);
         let mut table: UnguardedTable = args.read_imm();
@@ -70,7 +70,7 @@ pub(crate) unsafe extern "C" fn execute_table_size<T, W>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     T: Guarded,
@@ -78,7 +78,7 @@ where
     W: Write<u32>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let table: UnguardedTable = args.read_imm();
         let table = table.as_ref().downcast_ref::<T>().unwrap_unchecked();
         let size = table.size();
@@ -96,7 +96,7 @@ pub(crate) unsafe extern "C" fn execute_table_grow<T, R0, R1, W>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     T: Guarded,
@@ -106,7 +106,7 @@ where
     W: Write<u32>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let num = R1::read(&mut args);
         let val = R0::read(&mut args);
         let mut table: UnguardedTable = args.read_imm();
@@ -126,7 +126,7 @@ pub(crate) unsafe extern "C" fn execute_table_fill<T, R0, R1, R2>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     T: Guarded,
@@ -136,7 +136,7 @@ where
     R2: Read<u32>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let num = R2::read(&mut args);
         let val = R1::read(&mut args);
         let idx = R0::read(&mut args);
@@ -156,7 +156,7 @@ pub(crate) unsafe extern "C" fn execute_table_copy<T, R0, R1, R2>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     T: Guarded,
@@ -166,7 +166,7 @@ where
     R2: Read<u32>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let num = R2::read(&mut args);
         let src_idx = R1::read(&mut args);
         let dst_idx = R0::read(&mut args);
@@ -192,7 +192,7 @@ pub(crate) unsafe extern "C" fn execute_table_init<T, R0, R1, R2>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     T: Guarded,
@@ -203,7 +203,7 @@ where
     R2: Read<u32>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let num = R2::read(&mut args);
         let src_idx = R1::read(&mut args);
         let dst_idx = R0::read(&mut args);
@@ -225,14 +225,14 @@ pub(crate) unsafe extern "C" fn execute_elem_drop<T>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor,
 ) -> ControlFlowBits
 where
     T: Guarded,
     TypedElemEntity<T>: DowncastMut<ElemEntity>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let mut elem: UnguardedElem = args.read_imm();
         let elem = elem.as_mut().downcast_mut::<T>().unwrap_unchecked();
         elem.drop_elems();

@@ -14,7 +14,7 @@ pub(crate) unsafe extern "C" fn execute_global_get<T, W>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     T: Guarded,
@@ -22,7 +22,7 @@ where
     W: Write<T::Unguarded>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let global: UnguardedGlobal = args.read_imm();
         let global = global.as_ref().downcast_ref::<T>().unwrap_unchecked();
         let val = global.get_unguarded();
@@ -40,7 +40,7 @@ pub(crate) unsafe extern "C" fn execute_global_set<T, R>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     T: Guarded,
@@ -48,7 +48,7 @@ where
     R: Read<T::Unguarded>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let val = R::read(&mut args);
         let mut global: UnguardedGlobal = args.read_imm();
         let global = global.as_mut().downcast_mut::<T>().unwrap_unchecked();

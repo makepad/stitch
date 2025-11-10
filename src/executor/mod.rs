@@ -74,7 +74,7 @@ pub(crate) type ThreadedInstr = unsafe extern "C" fn(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits;
 
 #[cfg(windows)]
@@ -86,7 +86,7 @@ pub(crate) type ThreadedInstr = unsafe extern "sysv64" fn(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits;
 
 // Virtual registers
@@ -116,7 +116,7 @@ pub(crate) type Da = f64;
 ///
 /// This register is special because it's the only one that does not have a corresponding field in
 /// the [`Context`], but instead stores a pointer to the [`Context`] itself.
-pub(crate) type Cx<'a> = *mut Executor<'a>;
+pub(crate) type Cx<'a, 'b> = &'a mut Executor<'b>;
 
 /// Used to tell the interpreter what to do next.
 #[derive(Clone, Copy, Debug)]
@@ -297,7 +297,7 @@ pub(crate) unsafe extern "C" fn unreachable(
     _ia: Ia,
     _sa: Sa,
     _da: Da,
-    _cx: Cx,
+    _executor: &mut Executor<'_>,
 ) -> ControlFlowBits {
     ControlFlow::Trap(Trap::Unreachable).to_bits()
 }
@@ -310,10 +310,10 @@ pub(crate) unsafe extern "C" fn br(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let target = args.read_imm();
         args.set_ip(target);
         args.next()
@@ -328,13 +328,13 @@ pub(crate) unsafe extern "C" fn br_if<R>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     R: Read<i32>
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let cond: i32 = R::read(&mut args);
         let target = args.read_imm();
         if cond != 0 {
@@ -354,13 +354,13 @@ pub(crate) unsafe extern "C" fn br_if_not<R>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     R: Read<i32>
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let cond: i32 = R::read(&mut args);
         let target = args.read_imm();
         if cond == 0 {
@@ -380,7 +380,7 @@ pub(crate) unsafe extern "C" fn br_if_rel_op<T, B, R0, R1>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     B: BinOp<T, Output = i32>,
@@ -388,7 +388,7 @@ where
     R1: Read<T>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let x1 = R1::read(&mut args);
         let x0 = R0::read(&mut args);
         let cond: i32 = r#try!(B::bin_op(x0, x1));
@@ -410,7 +410,7 @@ pub(crate) unsafe extern "C" fn br_if_not_rel_op<T, B, R0, R1>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     B: BinOp<T, Output = i32>,
@@ -418,7 +418,7 @@ where
     R1: Read<T>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let x1 = R1::read(&mut args);
         let x0 = R0::read(&mut args);
         let cond: i32 = r#try!(B::bin_op(x0, x1));
@@ -441,13 +441,13 @@ pub(crate) unsafe extern "C" fn br_table<R>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where 
     R: Read<u32>
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let target_ida: u32 = R::read(&mut args);
         let target_count: u32 = args.read_imm();
         args.align_ip(align_of::<Ip>());
@@ -465,10 +465,10 @@ pub(crate) unsafe extern "C" fn return_(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits {
     unsafe {
-        let mut args = Args::from_parts(_ip, sp, _md, _ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(_ip, sp, _md, _ms, ia, sa, da, executor);
         // Restore call frame from stack.
         let old_sp = args.sp ;
         let saved_regs: SavedRegs = ptr::read(
@@ -490,10 +490,10 @@ pub(crate) unsafe extern "C" fn call_wasm(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let target = args.read_imm();
         let offset: i32 = args.read_imm();
         // Store call frame on stack.
@@ -522,24 +522,24 @@ pub(crate) unsafe extern "C" fn call_host(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, _md, _ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, _md, _ms, ia, sa, da, executor);
         let func: UnguardedFunc = args.read_imm();
         let offset: i32 = args.read_imm();
         let mem: Option<UnguardedMem> = args.read_imm();
 
-        let stack = &mut *(*args.cx).stack;
+        let stack = &mut args.executor.stack;
         let stack_height = args.sp.offset(offset as isize).offset_from(stack.as_ptr()) as usize;
         stack.set_len(stack_height);
         let FuncEntity::Host(func) = func.as_ref() else {
             hint::unreachable_unchecked();
         };
-        match func.trampoline().clone().call(Caller { store: &mut *(*args.cx).store, stack }) {
+        match func.trampoline().clone().call(Caller { store: &mut args.executor.store, stack }) {
             Ok(stack) => stack,
             Err(error) => {
-                (*args.cx).error = Some(error);
+                args.executor.error = Some(error);
                 return ControlFlow::Error.to_bits();
             }
         };
@@ -568,10 +568,10 @@ pub(crate) unsafe extern "C" fn call_indirect(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let func_ida = args.read_stack();
         let table: UnguardedTable = args.read_imm();
         let type_: UnguardedInternedFuncType = args.read_imm();
@@ -588,13 +588,13 @@ pub(crate) unsafe extern "C" fn call_indirect(
         if func
             .as_ref()
             .type_()
-            .to_unguarded((*(*cx).store).guard())
+            .to_unguarded(args.executor.store.guard())
             != type_
         {
             return ControlFlow::Trap(Trap::TypeMismatch).to_bits();
         }
-        let id = (*(*args.cx).store).guard();
-        Func(Handle::from_unguarded(func, id)).compile(&mut *(*args.cx).store);
+        let id = args.executor.store.guard();
+        Func(Handle::from_unguarded(func, id)).compile(&mut args.executor.store);
         match func.as_mut() {
             FuncEntity::Wasm(func) => {
                 let FuncBody::Compiled(code) = func.code_mut() else {
@@ -623,13 +623,13 @@ pub(crate) unsafe extern "C" fn call_indirect(
                 args.next()
             }
             FuncEntity::Host(func) => {
-                let stack = &mut *(*args.cx).stack;
+                let stack = &mut args.executor.stack;
                 let stack_height = args.sp.offset(stack_offset as isize).offset_from(stack.as_ptr()) as usize;
                 stack.set_len(stack_height);
-                match func.trampoline().clone().call(Caller { store: &mut *(*args.cx).store, stack }) {
+                match func.trampoline().clone().call(Caller { store: &mut args.executor.store, stack }) {
                     Ok(stack) => stack,
                     Err(error) => {
-                        (*cx).error = Some(error);
+                        args.executor.error = Some(error);
                         return ControlFlow::Error.to_bits();
                     }
                 };
@@ -662,7 +662,7 @@ pub(crate) unsafe extern "C" fn select<T, R0, R1, R2, W>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where 
     R0: Read<T>,
@@ -671,7 +671,7 @@ where
     W: Write<T>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let cond = R2::read(&mut args);
         let x1 = R1::read(&mut args);
         let x0 = R0::read(&mut args);
@@ -695,7 +695,7 @@ pub(crate) unsafe extern "C" fn load<T, R, W>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     T: ReadFromPtr,
@@ -703,10 +703,10 @@ where
     W: Write<T>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let offset = R::read(&mut args);
         let base = args.read_imm();
-        let val = r#try!(args.load(base, offset));
+        let val = r#try!(args.load_mem(base, offset));
         W::write(&mut args, val);
         args.next()
     }
@@ -720,7 +720,7 @@ pub(crate) unsafe extern "C" fn load_n<Dst, Src, R, W>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     Dst: ExtendingCastFrom<Src>,
@@ -729,10 +729,10 @@ where
     W: Write<Dst>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let offset = R::read(&mut args);
         let base = args.read_imm();
-        let src: Src = r#try!(args.load(base, offset));
+        let src: Src = r#try!(args.load_mem(base, offset));
         let dst = src.extending_cast();
         W::write(&mut args, dst);
         args.next()
@@ -747,7 +747,7 @@ pub(crate) unsafe extern "C" fn store<T, R0, R1>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     T: WriteToPtr,
@@ -755,11 +755,11 @@ where
     R0: Read<u32>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let val = R1::read(&mut args);
         let offset = R0::read(&mut args);
         let base: u32 = args.read_imm();
-        r#try!(args.store(base, offset, val));
+        r#try!(args.store_mem(base, offset, val));
         args.next()
     }
 }
@@ -772,7 +772,7 @@ pub(crate) unsafe extern "C" fn store_n<Src, Dst, R0, R1>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     Src: WrappingCast,
@@ -781,12 +781,12 @@ where
     R0: Read<u32>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let src = R1::read(&mut args);
         let offset = R0::read(&mut args);
         let base: u32 = args.read_imm();
         let dst: Dst = src.wrapping_cast();
-        r#try!(args.store(base, offset, dst));
+        r#try!(args.store_mem(base, offset, dst));
         args.next()
     }
 }
@@ -799,13 +799,13 @@ pub(crate) unsafe extern "C" fn memory_size<W>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where 
     W: Write<u32>
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
 
         // Read operands
         let mem: UnguardedMem = args.read_imm();
@@ -829,21 +829,21 @@ pub(crate) unsafe extern "C" fn memory_grow<R, W>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     R: Read<u32>,
     W: Write<u32>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, ptr::null_mut(), 0, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, ptr::null_mut(), 0, ia, sa, da, executor);
     
         // Read operands
         let count = R::read(&mut args);
         let mut mem: UnguardedMem = args.read_imm();
 
         // Perform operation
-        let stack = &mut *(*args.cx).stack;
+        let stack = &mut args.executor.stack;
         let stack_height = args.sp.offset_from(stack.as_ptr()) as usize;
         stack.set_len(stack_height);
         let old_size = mem
@@ -870,7 +870,7 @@ pub(crate) unsafe extern "C" fn memory_fill<R0, R1, R2>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where 
     R0: Read<u32>,
@@ -878,7 +878,7 @@ where
     R2: Read<u32>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let count = R2::read(&mut args);
         let val = R1::read(&mut args);
         let ida = R0::read(&mut args);
@@ -896,7 +896,7 @@ pub(crate) unsafe extern "C" fn memory_copy<R0, R1, R2>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where 
     R0: Read<u32>,
@@ -904,7 +904,7 @@ where
     R2: Read<u32>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let count = R2::read(&mut args);
         let src_ida = R1::read(&mut args);
         let dst_ida = R0::read(&mut args);
@@ -922,7 +922,7 @@ pub(crate) unsafe extern "C" fn memory_init<R0, R1, R2>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where 
     R0: Read<u32>,
@@ -930,7 +930,7 @@ where
     R2: Read<u32>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let count = R2::read(&mut args);
         let src_ida = R1::read(&mut args);
         let dst_ida = R0::read(&mut args);
@@ -949,10 +949,10 @@ pub(crate) unsafe extern "C" fn data_drop(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let mut data: UnguardedData = args.read_imm();
         data.as_mut().drop_bytes();
         args.next()
@@ -969,14 +969,14 @@ pub(crate) unsafe extern "C" fn copy<T, R, W>(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits
 where
     R: Read<T>,
     W: Write<T>,
 {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         let val = R::read(&mut args);
         W::write(&mut args, val);
         args.next()
@@ -991,7 +991,7 @@ pub(crate) unsafe extern "C" fn stop(
     _ia: Ia,
     _sa: Sa,
     _da: Da,
-    _cx: Cx,
+    _executor: &mut Executor<'_>,
 ) -> ControlFlowBits {
     ControlFlow::Stop.to_bits()
 }
@@ -1004,13 +1004,13 @@ pub(crate) unsafe extern "C" fn compile(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, md, ms, ia, sa, da, executor);
         args.align_ip(align_of::<UnguardedFuncRef>());
         let mut func = ptr::read(args.ip().cast());
-        Func(Handle::from_unguarded(func, (*(*cx).store).guard())).compile((*cx).store);
+        Func(Handle::from_unguarded(func, args.executor.store.guard())).compile(args.executor.store);
         let FuncEntity::Wasm(func) = func.as_mut() else {
             hint::unreachable_unchecked();
         };
@@ -1032,10 +1032,10 @@ pub(crate) unsafe extern "C" fn enter(
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx,
+    executor: &mut Executor<'_>,
 ) -> ControlFlowBits {
     unsafe {
-        let mut args = Args::from_parts(ip, sp, ptr::null_mut(), 0, ia, sa, da, cx);
+        let mut args = Args::from_parts(ip, sp, ptr::null_mut(), 0, ia, sa, da, executor);
         let func: UnguardedFunc = args.read_imm();
         let mem: Option<UnguardedMem> = args.read_imm();
         let FuncEntity::Wasm(func) = func.as_ref() else {
@@ -1046,7 +1046,7 @@ pub(crate) unsafe extern "C" fn enter(
         };
 
         // Check that the stack has enough space.
-        let stack = &mut *(*args.cx).stack;
+        let stack = &mut *(*args.executor).stack;
         let stack_height = (args.sp).offset_from(stack.as_mut_ptr()) as usize;
         if code.max_stack_height > stack.capacity() - stack_height {
             return ControlFlow::Trap(Trap::StackOverflow).to_bits();
@@ -1071,7 +1071,7 @@ pub(crate) unsafe extern "C" fn enter(
 
 // Helper functions
 
-pub(crate) struct Args<'a> {
+pub(crate) struct Args<'a, 'b> {
     ip_base: Ip,
     ip_offset: usize,
     sp: Sp,
@@ -1080,10 +1080,10 @@ pub(crate) struct Args<'a> {
     ia: Ia,
     sa: Sa,
     da: Da,
-    cx: Cx<'a>,
+    executor: &'a mut Executor<'b>,
 }
 
-impl<'a> Args<'a> {
+impl<'a, 'b> Args<'a, 'b> {
     unsafe fn from_parts(
         ip: Ip,
         sp: Sp,
@@ -1092,7 +1092,7 @@ impl<'a> Args<'a> {
         ia: Ia,
         sa: Sa,
         da: Da,
-        cx: Cx<'a>,
+        executor: &'a mut Executor<'b>,
     ) -> Self {
         let mut args = Self {
             ip_base: ip,
@@ -1103,13 +1103,13 @@ impl<'a> Args<'a> {
             ia,
             sa,
             da,
-            cx,
+            executor,
         };
         args.advance_ip(size_of::<InstrSlot>());
         args
     }
 
-    fn into_parts(self) -> (Ip, Sp, Md, Ms, Ia, Sa, Da, Cx<'a>) {
+    fn into_parts(self) -> (Ip, Sp, Md, Ms, Ia, Sa, Da, &'a mut Executor<'b>) {
         (
             self.ip(),
             self.sp,
@@ -1118,7 +1118,7 @@ impl<'a> Args<'a> {
             self.ia,
             self.sa,
             self.da,
-            self.cx,
+            self.executor,
         )
     }
 
@@ -1160,7 +1160,7 @@ impl<'a> Args<'a> {
         }
     }
 
-    unsafe fn load<T>(&self, base: u32, offset: u32) -> Result<T, Trap>
+    unsafe fn load_mem<T>(&self, base: u32, offset: u32) -> Result<T, Trap>
     where 
         T: ReadFromPtr
     {
@@ -1193,7 +1193,7 @@ impl<'a> Args<'a> {
         val.write_to_reg(self)
     }
 
-    unsafe fn store<T>(&mut self, base: u32, offset: u32, val: T) -> Result<(), Trap>
+    unsafe fn store_mem<T>(&mut self, base: u32, offset: u32, val: T) -> Result<(), Trap>
     where 
         T: WriteToPtr
     {
@@ -1209,8 +1209,8 @@ impl<'a> Args<'a> {
         unsafe {
             self.align_ip(code::ALIGN);
             let instr: ThreadedInstr = *self.ip().cast();
-            let (ip, sp, md, ms, ia, sa, da, cx) = self.into_parts();
-            (instr)(ip, sp, md, ms, ia, sa, da, cx)
+            let (ip, sp, md, ms, ia, sa, da, executor) = self.into_parts();
+            (instr)(ip, sp, md, ms, ia, sa, da, executor)
         }
     }
 }
