@@ -1,4 +1,4 @@
-//! Numeric validators
+//! Numeric instructions
 
 use super::*;
 

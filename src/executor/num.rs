@@ -1,4 +1,4 @@
-//! Numeric executors
+//! Numeric instructions
 
 use super::*;
 

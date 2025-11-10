@@ -1,4 +1,4 @@
-//! Table validators
+//! Table instructions
 
 use super::*;
 

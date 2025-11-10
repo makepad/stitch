@@ -1,4 +1,4 @@
-//! Global executors
+//! Global instructions
 
 use {
     super::*,

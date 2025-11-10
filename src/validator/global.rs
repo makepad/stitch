@@ -1,3 +1,5 @@
+//! Global instructions
+//! 
 use super::*;
 
 impl<'a> Validator<'a> {

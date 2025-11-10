@@ -1,10 +1,10 @@
-//! Numeric compilers
+//! Numeric instructions
 
 use super::*;
 
 impl<'a> Compiler<'a> {
     /// Compiles a unary operation.
-    pub(crate) fn compile_un_op<T, U>(&mut self) -> Result<(), DecodeError>
+    pub(super) fn compile_un_op<T, U>(&mut self) -> Result<(), DecodeError>
     where
         T: ReadFromReg,
         U: UnOp<T>,
@@ -49,7 +49,7 @@ impl<'a> Compiler<'a> {
     }
 
     /// Compiles a binary operation.
-    pub(crate) fn compile_bin_op<T, B>(&mut self) -> Result<(), DecodeError>
+    pub(super) fn compile_bin_op<T, B>(&mut self) -> Result<(), DecodeError>
     where
         T: ReadFromReg,
         B: BinOp<T>,

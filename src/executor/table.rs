@@ -1,4 +1,4 @@
-//! Table executors
+//! Table instructions
 
 use {
     super::*,
