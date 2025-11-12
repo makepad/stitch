@@ -1,4 +1,4 @@
-//! Global instructions
+//! Variable instructions
 
 use {
     super::*,
