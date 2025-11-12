@@ -1,4 +1,4 @@
-mod global;
+mod variable;
 mod memory;
 mod num;
 mod table;
@@ -1411,71 +1411,16 @@ impl<'a> InstrVisitor for Compiler<'a> {
         self.compile_select(Some(val_type))
     }
 
-    // Variable instructions
-
-    /// Compiles a `local.get` instruction.
     fn visit_local_get(&mut self, local_idx: u32) -> Result<(), DecodeError> {
-        // Skip this instruction if it is unreachable.
-        if self.block(0).is_unreachable {
-            return Ok(());
-        }
-
-        // Wasm uses `u32` indices for locals, but we use `usize` indices.
-        let local_idx = local_idx as usize;
-
-        // Push the output onto the stack and append it to the list of operands that refer to this
-        // local.
-        self.push_opd(self.locals[local_idx].type_);
-        self.push_local_opd(local_idx);
-
-        Ok(())
+        self.compile_local_get(local_idx)
     }
 
-    /// Compiles a `local.set` instruction.
     fn visit_local_set(&mut self, local_idx: u32) -> Result<(), DecodeError> {
-        // Skip this instruction if it is unreachable.
-        if self.block(0).is_unreachable {
-            return Ok(());
-        }
-
-        // We compile local.set by delegating to the code for compiling local.tee. This works
-        // because local.set is identical to local.tee, except that it pops its input from the
-        // stack.
-        self.visit_local_tee(local_idx)?;
-
-        // Pop the input from the stack.
-        self.pop_opd();
-
-        Ok(())
+       self.compile_local_set(local_idx)
     }
 
-    /// Compiles a `local.tee` instruction.
     fn visit_local_tee(&mut self, local_idx: u32) -> Result<(), DecodeError> {
-        // Skip this instruction if it is unreachable.
-        if self.block(0).is_unreachable {
-            return Ok(());
-        }
-
-        // Wasm uses `u32` indices for locals, but we use `usize` indices.
-        let local_idx = local_idx as usize;
-
-        // Obtain the type of the local.
-        let local_type = self.locals[local_idx].type_;
-
-        // The local.tee instruction overwrites the local, so we need to preserve all operands that
-        // refer to the local on the stack.
-        self.preserve_local(local_idx);
-
-        // Emit the instruction.
-        self.emit_instr(select_copy(local_type, self.opd(0).kind()));
-
-        // Emit the input.
-        self.emit_opd(0);
-
-        // Emit the stack offset of the local.
-        self.emit_stack_offset(self.locals[local_idx].stack_offset);
-     
-        Ok(())
+        self.compile_local_tee(local_idx)
     }
 
     fn visit_global_get(&mut self, global_idx: u32) -> Result<(), DecodeError> {
