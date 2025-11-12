@@ -1,5 +1,6 @@
 mod global;
-mod num;
+mod memory;
+mod numeric;
 mod table;
 
 use {
@@ -113,58 +114,6 @@ impl<'a> Validator<'a> {
                 input_type_0
             });
         }
-        Ok(())
-    }
-
-    fn validate_load<T>(&mut self, arg: MemArg) -> Result<(), DecodeError>
-    where
-        T: ValTypeOf,
-    {
-        self.validate_load_inner(arg, T::val_type_of(), align_of::<T>().ilog(2))
-    }
-
-    fn validate_load_n<Dst, Src>(&mut self, arg: MemArg) -> Result<(), DecodeError>
-    where
-        Dst: ValTypeOf,
-    {
-        self.validate_load_inner(arg, Dst::val_type_of(), align_of::<Src>().ilog(2))
-    }
-
-    fn validate_load_inner(&mut self, arg: MemArg, output_type: ValType, max_align: u32) -> Result<(), DecodeError> {
-        if arg.align > max_align {
-            return Err(DecodeError::new("alignment too large"));
-        }
-        self.module.memory(0)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        self.push_opd(output_type);
-        Ok(())
-    }
-
-    fn validate_store<T>(&mut self, arg: MemArg) -> Result<(), DecodeError>
-    where
-        T: ValTypeOf,
-    {
-        self.validate_store_inner(arg, T::val_type_of(), align_of::<T>().ilog(2))
-    }
-
-    fn validate_store_n<Src, Dst>(&mut self, arg: MemArg) -> Result<(), DecodeError>
-    where
-        Src: ValTypeOf
-    {
-        self.validate_store_inner(
-            arg,
-            Src::val_type_of(),
-            align_of::<Dst>().ilog(2),
-        )
-    }
-
-    fn validate_store_inner(&mut self, arg: MemArg, input_type: ValType, max_align: u32) -> Result<(), DecodeError> {
-        if arg.align > max_align {
-            return Err(DecodeError::new("alignment too large"));
-        }
-        self.module.memory(0)?;
-        self.pop_opd()?.check(input_type)?;
-        self.pop_opd()?.check(ValType::I32)?;
         Ok(())
     }
 
@@ -514,7 +463,6 @@ impl<'a> InstrVisitor for Validator<'a> {
         self.validate_elem_drop(elem_idx)
     }
 
-    // Memory instructions
     fn visit_i32_load(&mut self, arg: MemArg) -> Result<(), Self::Error> {
         self.validate_load::<i32>(arg)
     }
@@ -608,46 +556,27 @@ impl<'a> InstrVisitor for Validator<'a> {
     }
 
     fn visit_memory_size(&mut self) -> Result<(), Self::Error> {
-        self.module.memory(0)?;
-        self.push_opd(ValType::I32);
-        Ok(())
+        self.validate_memory_size()
     }
 
     fn visit_memory_grow(&mut self) -> Result<(), Self::Error> {
-        self.module.memory(0)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        self.push_opd(ValType::I32);
-        Ok(())
+        self.validate_memory_grow()
     }
 
     fn visit_memory_fill(&mut self) -> Result<(), Self::Error> {
-        self.module.memory(0)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        Ok(())
+        self.validate_memory_fill()
     }
 
     fn visit_memory_copy(&mut self) -> Result<(), Self::Error> {
-        self.module.memory(0)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        Ok(())
+        self.validate_memory_copy()
     }
 
     fn visit_memory_init(&mut self, data_idx: u32) -> Result<(), Self::Error> {
-        self.module.memory(0)?;
-        self.module.data(data_idx)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        self.pop_opd()?.check(ValType::I32)?;
-        Ok(())
+        self.validate_memory_init(data_idx)
     }
 
     fn visit_data_drop(&mut self, data_idx: u32) -> Result<(), Self::Error> {
-        self.module.data(data_idx)?;
-        Ok(())
+        self.validate_data_drop(data_idx)
     }
 
     // Numeric instructions
