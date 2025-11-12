@@ -639,7 +639,7 @@ impl<'a> Compiler<'a> {
     {
         debug_assert!(mem::size_of::<T>() <= mem::size_of::<InstrSlot>());
         self.code.push(val);
-        self.code.pad_to_align(code::ALIGN);
+        // self.code.pad_to_align(code::ALIGN);
     }
 
     fn emit_instr(&mut self, instr: ThreadedInstr) {

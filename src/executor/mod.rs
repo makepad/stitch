@@ -876,7 +876,7 @@ impl<'a, 'b> Args<'a, 'b> {
         unsafe {
             self.align_ip(align_of::<T>());
             let val = ptr::read(self.ip().cast());
-            self.advance_ip(size_of::<InstrSlot>());
+            self.advance_ip(size_of::<T>());
             val
         }
     }
