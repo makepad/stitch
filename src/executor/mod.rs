@@ -12,13 +12,13 @@ macro_rules! r#try {
     };
 }
 
-pub(crate) mod global;
-pub(crate) mod num;
+pub(crate) mod variable;
+pub(crate) mod numeric;
 pub(crate) mod table;
 
 pub(crate) use {
-    global::*,
-    num::*,
+    variable::*,
+    numeric::*,
     table::*,
 };
 

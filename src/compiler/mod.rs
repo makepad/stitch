@@ -1,6 +1,6 @@
 mod variable;
 mod memory;
-mod num;
+mod numeric;
 mod table;
 
 use {
